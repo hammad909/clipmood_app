@@ -136,69 +136,6 @@ class _ClipEditScreenState extends State<ClipEditScreen> {
     });
   }
 
-  void _increaseStart() {
-    final controller = _controller;
-    if (controller == null) return;
-
-    if (_startSeconds + 1 >= _endSeconds) return;
-
-    setState(() {
-      _startSeconds++;
-      _trimRange = RangeValues(
-        _startSeconds.toDouble(),
-        _endSeconds.toDouble(),
-      );
-    });
-
-    controller.seekTo(Duration(seconds: _startSeconds));
-  }
-
-  void _decreaseStart() {
-    final controller = _controller;
-    if (controller == null) return;
-
-    if (_startSeconds <= 0) return;
-
-    setState(() {
-      _startSeconds--;
-      _trimRange = RangeValues(
-        _startSeconds.toDouble(),
-        _endSeconds.toDouble(),
-      );
-    });
-
-    controller.seekTo(Duration(seconds: _startSeconds));
-  }
-
-  void _increaseEnd() {
-    final controller = _controller;
-    if (controller == null) return;
-
-    final videoDuration = controller.value.duration.inSeconds;
-
-    if (_endSeconds + 1 > videoDuration) return;
-
-    setState(() {
-      _endSeconds++;
-      _trimRange = RangeValues(
-        _startSeconds.toDouble(),
-        _endSeconds.toDouble(),
-      );
-    });
-  }
-
-  void _decreaseEnd() {
-    if (_endSeconds - 1 <= _startSeconds) return;
-
-    setState(() {
-      _endSeconds--;
-      _trimRange = RangeValues(
-        _startSeconds.toDouble(),
-        _endSeconds.toDouble(),
-      );
-    });
-  }
-
   void _updateTrimRange(RangeValues values) {
     if (values.end - values.start < 2) {
       return;
@@ -327,146 +264,186 @@ class _ClipEditScreenState extends State<ClipEditScreen> {
       );
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double videoHeight = constraints.maxHeight * 0.38;
+    return OrientationBuilder(
+      builder: (context, orientation) {
+        final isLandscape = orientation == Orientation.landscape;
+
+        if (isLandscape) {
+          return Row(
+            children: [
+              SizedBox(
+                width: MediaQuery.sizeOf(context).width * 0.45,
+                child: Column(
+                  children: [
+                    Expanded(child: _buildVideoPlayer(controller)),
+                    _buildTransportRow(controller),
+                    _buildPlaybackButtons(),
+                    const SizedBox(height: AppSpacing.sm),
+                  ],
+                ),
+              ),
+              Expanded(child: _buildEditorPanel()),
+            ],
+          );
+        }
 
         return Column(
           children: [
-            Container(
+            SizedBox(
               width: double.infinity,
-              height: videoHeight,
-              color: Colors.black,
-              child: Center(
-                child: AspectRatio(
-                  aspectRatio: controller.value.aspectRatio,
-                  child: VideoPlayer(controller),
-                ),
-              ),
+              height: MediaQuery.sizeOf(context).height * 0.32,
+              child: _buildVideoPlayer(controller),
             ),
             const SizedBox(height: AppSpacing.sm),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: Row(
-                children: [
-                  Text(
-                    TimeFormatter.formatDuration(controller.value.position),
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                  Expanded(
-                    child: VideoProgressIndicator(
-                      controller,
-                      allowScrubbing: true,
-                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                    ),
-                  ),
-                  Text(
-                    TimeFormatter.formatDuration(controller.value.duration),
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                ],
+            _buildTransportRow(controller),
+            const SizedBox(height: AppSpacing.md),
+            _buildPlaybackButtons(),
+            const SizedBox(height: AppSpacing.sm),
+            Expanded(child: _buildEditorPanel()),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildVideoPlayer(VideoPlayerController controller) {
+    return Container(
+      width: double.infinity,
+      color: Colors.black,
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: controller.value.aspectRatio,
+          child: VideoPlayer(controller),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTransportRow(VideoPlayerController controller) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+      child: Row(
+        children: [
+          Text(
+            TimeFormatter.formatDuration(controller.value.position),
+            style: const TextStyle(fontSize: 13),
+          ),
+          Expanded(
+            child: VideoProgressIndicator(
+              controller,
+              allowScrubbing: true,
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            ),
+          ),
+          Text(
+            TimeFormatter.formatDuration(controller.value.duration),
+            style: const TextStyle(fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlaybackButtons() {
+    final controller = _controller!;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        IconButton.outlined(
+          tooltip: 'Go to clip start',
+          onPressed: _seekToStart,
+          icon: const Icon(Icons.skip_previous),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        IconButton.filled(
+          iconSize: 34,
+          onPressed: controller.value.isPlaying
+              ? () {
+                  setState(() {
+                    controller.pause();
+                  });
+                }
+              : _playClipPreview,
+          icon: Icon(
+            controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEditorPanel() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        children: [
+          _buildClipTitleCard(),
+          const SizedBox(height: AppSpacing.lg),
+          _buildTrimSlider(),
+          const SizedBox(height: AppSpacing.lg),
+          Row(
+            children: [
+              Expanded(
+                child: _buildTimeDisplay(
+                  title: 'Start Time',
+                  value: _startSeconds,
+                ),
               ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: _buildTimeDisplay(
+                  title: 'End Time',
+                  value: _endSeconds,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          _buildDurationCard(),
+          const SizedBox(height: AppSpacing.xl),
+          if (_isExporting) ...[
+            LinearProgressIndicator(
+              value: _exportProgress == 0.0 ? null : _exportProgress,
             ),
             const SizedBox(height: AppSpacing.md),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton.outlined(
-                  tooltip: 'Go to clip start',
-                  onPressed: _seekToStart,
-                  icon: const Icon(Icons.skip_previous),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                IconButton.filled(
-                  iconSize: 34,
-                  onPressed: controller.value.isPlaying
-                      ? () {
-                          setState(() {
-                            controller.pause();
-                          });
-                        }
-                      : _playClipPreview,
-                  icon: Icon(
-                    controller.value.isPlaying
-                        ? Icons.pause
-                        : Icons.play_arrow,
-                  ),
-                ),
-              ],
+            Text(
+              'Exporting clip... ${(_exportProgress * 100).toStringAsFixed(0)}%',
+              style: const TextStyle(color: AppColors.textMuted),
             ),
-            const SizedBox(height: AppSpacing.sm),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Column(
-                  children: [
-                    _buildClipTitleCard(),
-                    const SizedBox(height: AppSpacing.lg),
-                    _buildTrimSlider(),
-                    const SizedBox(height: AppSpacing.lg),
-                    _buildTimeAdjuster(
-                      title: 'Start Time',
-                      value: _startSeconds,
-                      onMinus: _decreaseStart,
-                      onPlus: _increaseStart,
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                    _buildTimeAdjuster(
-                      title: 'End Time',
-                      value: _endSeconds,
-                      onMinus: _decreaseEnd,
-                      onPlus: _increaseEnd,
-                    ),
-                    const SizedBox(height: AppSpacing.xl),
-                    _buildDurationCard(),
-                    const SizedBox(height: AppSpacing.xl),
-                    if (_isExporting) ...[
-                      LinearProgressIndicator(
-                        value: _exportProgress == 0.0 ? null : _exportProgress,
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                      Text(
-                        'Exporting clip... ${(_exportProgress * 100).toStringAsFixed(0)}%',
-                        style: const TextStyle(color: AppColors.textMuted),
-                      ),
-                    ] else ...[
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _createClip,
-                          icon: const Icon(Icons.content_cut),
-                          label: const Text('Create Clip'),
-                        ),
-                      ),
-                    ],
-                    if (_exportedClipPath != null) ...[
-                      const SizedBox(height: AppSpacing.lg),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(AppSpacing.md),
-                        decoration: BoxDecoration(
-                          borderRadius: AppRadius.mdRadius,
-                          color: AppColors.success.withValues(alpha: 0.12),
-                          border: Border.all(
-                            color: AppColors.success.withValues(alpha: 0.35),
-                          ),
-                        ),
-                        child: Text(
-                          'Saved clip:\n$_exportedClipPath',
-                          style: const TextStyle(
-                            color: AppColors.success,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
+          ] else ...[
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _createClip,
+                icon: const Icon(Icons.content_cut),
+                label: const Text('Create Clip'),
+              ),
+            ),
+          ],
+          if (_exportedClipPath != null) ...[
+            const SizedBox(height: AppSpacing.lg),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                borderRadius: AppRadius.mdRadius,
+                color: AppColors.success.withValues(alpha: 0.12),
+                border: Border.all(
+                  color: AppColors.success.withValues(alpha: 0.35),
+                ),
+              ),
+              child: Text(
+                'Saved clip:\n$_exportedClipPath',
+                style: const TextStyle(
+                  color: AppColors.success,
+                  fontSize: 12,
                 ),
               ),
             ),
           ],
-        );
-      },
+        ],
+      ),
     );
   }
 
@@ -627,11 +604,9 @@ class _ClipEditScreenState extends State<ClipEditScreen> {
     );
   }
 
-  Widget _buildTimeAdjuster({
+  Widget _buildTimeDisplay({
     required String title,
     required int value,
-    required VoidCallback onMinus,
-    required VoidCallback onPlus,
   }) {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -640,38 +615,23 @@ class _ClipEditScreenState extends State<ClipEditScreen> {
         color: AppColors.cardBackground,
         border: Border.all(color: AppColors.border),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  TimeFormatter.formatDuration(Duration(seconds: value)),
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
+          Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 13,
             ),
           ),
-          IconButton.outlined(
-            onPressed: _isExporting ? null : onMinus,
-            icon: const Icon(Icons.remove),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          IconButton.outlined(
-            onPressed: _isExporting ? null : onPlus,
-            icon: const Icon(Icons.add),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            TimeFormatter.formatDuration(Duration(seconds: value)),
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ),
