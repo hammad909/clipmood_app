@@ -1,0 +1,44 @@
+{
+  "video_id": "local_video_001",
+  "video_name": "sample_video.mp4",
+  "duration_seconds": 420,
+  "model_version": "fake_ai_v1",
+  "suggestions": [
+    {
+      "id": "clip_001",
+      "start_seconds": 80,
+      "end_seconds": 98,
+      "label": "funny",
+      "confidence": 0.84,
+      "reason": [
+        "laughter",
+        "audio spike",
+        "fast speech"
+      ]
+    },
+    {
+      "id": "clip_002",
+      "start_seconds": 190,
+      "end_seconds": 225,
+      "label": "emotional",
+      "confidence": 0.78,
+      "reason": [
+        "soft voice",
+        "music",
+        "slow pacing"
+      ]
+    },
+    {
+      "id": "clip_003",
+      "start_seconds": 300,
+      "end_seconds": 322,
+      "label": "exciting",
+      "confidence": 0.81,
+      "reason": [
+        "loud reaction",
+        "high energy",
+        "sudden volume increase"
+      ]
+    }
+  ]
+}
