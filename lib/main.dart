@@ -227,17 +227,29 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildBrandMark() {
     return Center(
       child: Container(
-        width: 88,
-        height: 88,
+        width: 96,
+        height: 96,
         decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: AppGradients.hero,
+          borderRadius: BorderRadius.circular(28),
           boxShadow: AppShadows.glow(AppColors.primary),
         ),
-        child: const Icon(
-          Icons.movie_creation_rounded,
-          color: Colors.white,
-          size: 40,
+        clipBehavior: Clip.antiAlias,
+        child: Image.asset(
+          'assets/icon/clipmood_icon.png',
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(28),
+                gradient: AppGradients.hero,
+              ),
+              child: const Icon(
+                Icons.movie_creation_rounded,
+                color: Colors.white,
+                size: 42,
+              ),
+            );
+          },
         ),
       ),
     );
