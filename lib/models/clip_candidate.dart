@@ -1,5 +1,4 @@
 import 'dart:math';
-
 import 'ai_signal.dart';
 import 'ai_suggestion.dart';
 
@@ -10,6 +9,7 @@ class ClipCandidate {
   final String mood;
   final double score;
   final double confidence;
+  final double categoryPrecision;
   final List<AiSignal> signals;
   final List<String> reasons;
 
@@ -20,6 +20,7 @@ class ClipCandidate {
     required this.mood,
     required this.score,
     required this.confidence,
+    this.categoryPrecision = 0.0,
     this.signals = const [],
     this.reasons = const [],
   });
@@ -86,6 +87,7 @@ class ClipCandidate {
       mood: better.mood,
       score: max(score, other.score) + 0.04,
       confidence: max(confidence, other.confidence),
+      categoryPrecision: max(categoryPrecision, other.categoryPrecision),
       signals: mergedSignals,
       reasons: _uniqueStrings([
         ...reasons,
@@ -102,6 +104,9 @@ class ClipCandidate {
       startSeconds: startSeconds,
       endSeconds: endSeconds,
       confidence: confidence.clamp(0.0, 1.0).toDouble(),
+      score: score.clamp(0.0, 1.0).toDouble(),
+      categoryPrecision: categoryPrecision.clamp(0.0, 1.0).toDouble(),
+      sourceDiversity: sourceDiversity,
       reason: _uniqueStrings(reasons).take(6).toList(),
     );
   }
@@ -113,6 +118,7 @@ class ClipCandidate {
     String? mood,
     double? score,
     double? confidence,
+    double? categoryPrecision,
     List<AiSignal>? signals,
     List<String>? reasons,
   }) {
@@ -123,6 +129,7 @@ class ClipCandidate {
       mood: mood ?? this.mood,
       score: score ?? this.score,
       confidence: confidence ?? this.confidence,
+      categoryPrecision: categoryPrecision ?? this.categoryPrecision,
       signals: signals ?? this.signals,
       reasons: reasons ?? this.reasons,
     );

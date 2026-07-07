@@ -263,7 +263,7 @@ class AiClipAnalyzerService {
 
       final signals = _signalBuilder.buildSignals(
         durationSeconds: durationSeconds,
-        intent: ClipIntent.general,
+        intent: intent,
         yamnetWindows: yamnetWindows,
         audioPeaks: audioPeaks,
         transcriptSegments: transcriptResult.segments,
@@ -274,7 +274,7 @@ class AiClipAnalyzerService {
       final suggestions = _clipScorer.buildSuggestions(
         signals: signals,
         durationSeconds: durationSeconds,
-        intent: ClipIntent.general,
+        intent: intent,
       );
 
       final debugEntries = _buildDebugEntries(
@@ -360,12 +360,13 @@ class AiClipAnalyzerService {
         ],
         notes: [
           'Final suggestions come from audio, transcript, visual, and face/reaction signals, then are auto-sorted into sections.',
-          'Auto category scan',
+          'Auto category scan with category-confirmation scoring',
           'Scan mode: ${options.mode.label}',
           options.allowTranscriptionEngineRun
               ? 'Local Whisper was allowed for this scan.'
               : 'Heavy local Whisper was skipped unless cached transcript existed.',
           'Audio, transcript, visual, and face/reaction signals plug into the same category scorer.',
+          'Clips are now accepted only when the final category has strong evidence, not just a high raw score.',
         ],
       ),
     );

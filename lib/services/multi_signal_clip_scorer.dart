@@ -155,9 +155,12 @@ class MultiSignalClipScorer {
         .clamp(0.0, 0.96)
         .toDouble();
 
+    final categoryPrecision = _categoryPrecisionScore(candidate, candidate.mood);
+
     return candidate.copyWith(
       score: finalScore,
       confidence: confidence,
+      categoryPrecision: categoryPrecision,
       title: _titleForMood(candidate.mood),
       reasons: _rankedPublicReasons(candidate, finalScore: finalScore),
     );
@@ -165,14 +168,24 @@ class MultiSignalClipScorer {
 
   bool _passesQualityGate(ClipCandidate candidate) {
     final mood = _canonicalMood(candidate.mood);
-    final hasRequiredEvidence = _hasRequiredEvidence(candidate, mood);
-    if (!hasRequiredEvidence) return false;
+
+    // First gate: the category must have real evidence. A high score alone is
+    // not enough, because loudness or motion can otherwise be mislabelled as
+    // funny/sad/emotional.
+    if (!_hasRequiredEvidence(candidate, mood)) return false;
+
+    // Second gate: confirm that the detected reason/category is precise enough.
+    final precisionScore = _categoryPrecisionScore(candidate, mood);
+    if (precisionScore < _minPrecisionForMood(mood)) return false;
 
     final minScore = _minScoreForMood(mood);
     if (candidate.score < minScore) return false;
 
+    // Avoid accepting very low-confidence clips, even when one weak tag matched.
+    if (candidate.confidence < _minConfidenceForMood(mood)) return false;
+
     // Do not keep weak generic highlights when better category clips exist.
-    if (mood == 'highlight' && candidate.score < 0.30) return false;
+    if (mood == 'highlight' && candidate.score < 0.36) return false;
 
     return true;
   }
@@ -310,6 +323,21 @@ class MultiSignalClipScorer {
         if (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('smile'))) bonus += 0.09;
         if (sources.contains(AiSignalSource.transcript)) bonus += 0.07;
         break;
+      case 'happy':
+        if (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('happy face') || tag.contains('smile'))) bonus += 0.11;
+        if (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('happy') || tag.contains('celebration') || tag.contains('crowd'))) bonus += 0.09;
+        if (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('happy wording'))) bonus += 0.08;
+        break;
+      case 'romantic':
+        if (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('romantic'))) bonus += 0.11;
+        if (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('romantic') || tag.contains('tender'))) bonus += 0.08;
+        if (sources.contains(AiSignalSource.faceReaction)) bonus += 0.04;
+        break;
+      case 'angry':
+        if (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('angry'))) bonus += 0.11;
+        if (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('angry') || tag.contains('argument'))) bonus += 0.10;
+        if (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('angry') || tag.contains('serious'))) bonus += 0.07;
+        break;
       case 'sad':
         if (sources.contains(AiSignalSource.transcript)) bonus += 0.10;
         if (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('cry') || tag.contains('sad'))) bonus += 0.10;
@@ -325,6 +353,19 @@ class MultiSignalClipScorer {
         if (sources.contains(AiSignalSource.sceneChange)) bonus += 0.07;
         if (sources.contains(AiSignalSource.audioPeak)) bonus += 0.07;
         if (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('action'))) bonus += 0.10;
+        break;
+      case 'fight':
+        if (sources.contains(AiSignalSource.visualMotion)) bonus += 0.08;
+        if (sources.contains(AiSignalSource.sceneChange)) bonus += 0.07;
+        if (sources.contains(AiSignalSource.audioPeak)) bonus += 0.07;
+        if (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('fight') || tag.contains('impact'))) bonus += 0.11;
+        if (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('fight'))) bonus += 0.08;
+        break;
+      case 'entertaining':
+        if (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('entertaining') || tag.contains('laughter') || tag.contains('crowd'))) bonus += 0.09;
+        if (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('entertaining') || tag.contains('smile') || tag.contains('reaction'))) bonus += 0.08;
+        if (sources.contains(AiSignalSource.visualMotion) || sources.contains(AiSignalSource.sceneChange)) bonus += 0.05;
+        if (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('entertaining'))) bonus += 0.07;
         break;
       case 'reaction':
         if (sources.contains(AiSignalSource.faceReaction)) bonus += 0.10;
@@ -366,6 +407,17 @@ class MultiSignalClipScorer {
         return (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('laughter'))) ||
             (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('smile'))) ||
             (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('comedy')));
+      case 'happy':
+        return (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('happy face') || tag.contains('smile'))) ||
+            (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('happy') || tag.contains('celebration') || tag.contains('crowd'))) ||
+            (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('happy wording')));
+      case 'romantic':
+        return (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('romantic'))) ||
+            (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('romantic') || tag.contains('tender')));
+      case 'angry':
+        return (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('angry'))) ||
+            (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('angry') || tag.contains('argument'))) ||
+            (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('angry') || tag.contains('serious')));
       case 'sad':
         return sources.contains(AiSignalSource.transcript) ||
             (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('sad') || tag.contains('cry'))) ||
@@ -379,6 +431,16 @@ class MultiSignalClipScorer {
             sources.contains(AiSignalSource.sceneChange) ||
             sources.contains(AiSignalSource.audioPeak) ||
             (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('action') || tag.contains('crowd')));
+      case 'fight':
+        return sources.contains(AiSignalSource.visualMotion) ||
+            sources.contains(AiSignalSource.sceneChange) ||
+            sources.contains(AiSignalSource.audioPeak) ||
+            (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('fight') || tag.contains('impact') || tag.contains('action'))) ||
+            (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('fight')));
+      case 'entertaining':
+        return (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('entertaining') || tag.contains('laughter') || tag.contains('crowd') || tag.contains('hype'))) ||
+            (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('entertaining') || tag.contains('smile') || tag.contains('reaction'))) ||
+            candidate.sourceDiversity >= 2;
       case 'reaction':
         return sources.contains(AiSignalSource.faceReaction) ||
             sources.contains(AiSignalSource.audioEvent) ||
@@ -399,6 +461,161 @@ class MultiSignalClipScorer {
             sources.contains(AiSignalSource.faceReaction);
       case 'highlight':
         return candidate.sourceDiversity >= 2 || candidate.signalStrength >= 0.28;
+      default:
+        return false;
+    }
+  }
+
+  double _categoryPrecisionScore(ClipCandidate candidate, String mood) {
+    final canonicalMood = _canonicalMood(mood);
+    final sources = candidate.sources;
+    final tags = _allTags(candidate);
+    final positiveSignalCount = candidate.signals.where((signal) => !signal.isNegative).length;
+
+    double score = 0.0;
+
+    if (_hasStrongCategoryAnchor(candidate, canonicalMood)) score += 0.38;
+    if (candidate.sourceDiversity >= 2) score += 0.16;
+    if (candidate.sourceDiversity >= 3) score += 0.08;
+    if (positiveSignalCount >= 2) score += 0.08;
+    if (positiveSignalCount >= 3) score += 0.06;
+    if (candidate.signalStrength >= 0.30) score += 0.10;
+    if (candidate.signalStrength >= 0.45) score += 0.06;
+    if (candidate.confidence >= 0.65) score += 0.10;
+
+    switch (canonicalMood) {
+      case 'funny':
+        if (tags.any((tag) => tag.contains('laughter'))) score += 0.18;
+        if (tags.any((tag) => tag.contains('smile'))) score += 0.12;
+        if (tags.any((tag) => tag.contains('comedy'))) score += 0.12;
+        break;
+      case 'happy':
+        if (tags.any((tag) => tag.contains('happy face') || tag.contains('happy wording'))) score += 0.18;
+        if (tags.any((tag) => tag.contains('smile'))) score += 0.12;
+        if (tags.any((tag) => tag.contains('celebration') || tag.contains('crowd') || tag.contains('hype'))) score += 0.12;
+        break;
+      case 'romantic':
+        if (tags.any((tag) => tag.contains('romantic') || tag.contains('tender'))) score += 0.22;
+        if (sources.contains(AiSignalSource.transcript)) score += 0.12;
+        if (sources.contains(AiSignalSource.audioEvent)) score += 0.08;
+        break;
+      case 'angry':
+        if (tags.any((tag) => tag.contains('angry') || tag.contains('argument') || tag.contains('serious'))) score += 0.22;
+        if (sources.contains(AiSignalSource.transcript)) score += 0.10;
+        if (sources.contains(AiSignalSource.audioEvent)) score += 0.10;
+        if (sources.contains(AiSignalSource.faceReaction)) score += 0.06;
+        break;
+      case 'sad':
+        if (tags.any((tag) => tag.contains('sad') || tag.contains('cry'))) score += 0.22;
+        if (sources.contains(AiSignalSource.transcript)) score += 0.10;
+        if (sources.contains(AiSignalSource.faceReaction)) score += 0.06;
+        break;
+      case 'emotional':
+        if (tags.any((tag) => tag.contains('emotional'))) score += 0.16;
+        if (sources.contains(AiSignalSource.transcript)) score += 0.12;
+        if (sources.contains(AiSignalSource.faceReaction)) score += 0.08;
+        break;
+      case 'action':
+        if (sources.contains(AiSignalSource.visualMotion)) score += 0.12;
+        if (sources.contains(AiSignalSource.sceneChange)) score += 0.10;
+        if (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('action'))) score += 0.14;
+        if (sources.contains(AiSignalSource.audioPeak)) score += 0.08;
+        break;
+      case 'fight':
+        if (tags.any((tag) => tag.contains('fight') || tag.contains('impact'))) score += 0.20;
+        if (sources.contains(AiSignalSource.visualMotion)) score += 0.10;
+        if (sources.contains(AiSignalSource.sceneChange)) score += 0.08;
+        if (sources.contains(AiSignalSource.audioEvent)) score += 0.10;
+        if (sources.contains(AiSignalSource.audioPeak)) score += 0.06;
+        break;
+      case 'entertaining':
+        if (tags.any((tag) => tag.contains('entertaining') || tag.contains('laughter') || tag.contains('crowd') || tag.contains('hype'))) score += 0.18;
+        if (sources.contains(AiSignalSource.faceReaction)) score += 0.10;
+        if (sources.contains(AiSignalSource.visualMotion) || sources.contains(AiSignalSource.sceneChange)) score += 0.06;
+        if (candidate.sourceDiversity >= 2) score += 0.08;
+        break;
+      case 'reaction':
+        if (sources.contains(AiSignalSource.faceReaction)) score += 0.16;
+        if (tags.any((tag) => tag.contains('reaction'))) score += 0.14;
+        if (sources.contains(AiSignalSource.audioEvent)) score += 0.06;
+        break;
+      case 'hook':
+      case 'info':
+        if (sources.contains(AiSignalSource.transcript)) score += 0.22;
+        break;
+      case 'music':
+        if (sources.contains(AiSignalSource.audioEvent)) score += 0.12;
+        if (sources.contains(AiSignalSource.audioPeak)) score += 0.10;
+        if (tags.any((tag) => tag.contains('music'))) score += 0.12;
+        break;
+      case 'viral':
+        if (tags.any((tag) => tag.contains('crowd') || tag.contains('hype') || tag.contains('strong'))) score += 0.12;
+        if (sources.contains(AiSignalSource.audioPeak)) score += 0.08;
+        if (candidate.sourceDiversity >= 2) score += 0.08;
+        break;
+      case 'weird':
+        if (tags.any((tag) => tag.contains('weird') || tag.contains('unexpected'))) score += 0.20;
+        if (sources.contains(AiSignalSource.transcript)) score += 0.08;
+        if (sources.contains(AiSignalSource.audioEvent)) score += 0.08;
+        break;
+      case 'highlight':
+        if (candidate.sourceDiversity >= 2) score += 0.16;
+        if (candidate.signalStrength >= 0.40) score += 0.12;
+        break;
+    }
+
+    // One weak source can suggest a candidate, but should not fully confirm it.
+    if (candidate.sourceDiversity == 1 && positiveSignalCount == 1) score -= 0.08;
+
+    return score.clamp(0.0, 1.0).toDouble();
+  }
+
+  bool _hasStrongCategoryAnchor(ClipCandidate candidate, String mood) {
+    final canonicalMood = _canonicalMood(mood);
+    final sources = candidate.sources;
+    final tags = _allTags(candidate);
+
+    switch (canonicalMood) {
+      case 'funny':
+        return tags.any((tag) => tag.contains('laughter') || tag.contains('smile') || tag.contains('comedy'));
+      case 'happy':
+        return tags.any((tag) =>
+            tag.contains('happy face') ||
+            tag.contains('happy wording') ||
+            tag.contains('smile') ||
+            tag.contains('celebration') ||
+            tag.contains('crowd') ||
+            tag.contains('hype'));
+      case 'romantic':
+        return tags.any((tag) => tag.contains('romantic') || tag.contains('tender'));
+      case 'angry':
+        return tags.any((tag) => tag.contains('angry') || tag.contains('argument') || tag.contains('serious'));
+      case 'sad':
+        return tags.any((tag) => tag.contains('sad') || tag.contains('cry'));
+      case 'emotional':
+        return tags.any((tag) => tag.contains('emotional')) || sources.contains(AiSignalSource.transcript);
+      case 'action':
+        return tags.any((tag) => tag.contains('action') || tag.contains('motion') || tag.contains('scene change') || tag.contains('loudness'));
+      case 'fight':
+        return tags.any((tag) => tag.contains('fight') || tag.contains('impact') || tag.contains('action')) ||
+            sources.contains(AiSignalSource.audioPeak);
+      case 'entertaining':
+        return tags.any((tag) => tag.contains('entertaining') || tag.contains('laughter') || tag.contains('crowd') || tag.contains('hype') || tag.contains('smile')) ||
+            candidate.sourceDiversity >= 2;
+      case 'reaction':
+        return tags.any((tag) => tag.contains('reaction') || tag.contains('face') || tag.contains('head movement') || tag.contains('eye expression'));
+      case 'hook':
+      case 'info':
+        return sources.contains(AiSignalSource.transcript);
+      case 'music':
+        return tags.any((tag) => tag.contains('music')) || sources.contains(AiSignalSource.audioPeak);
+      case 'viral':
+        return tags.any((tag) => tag.contains('crowd') || tag.contains('hype') || tag.contains('strong delivery')) ||
+            candidate.sourceDiversity >= 2;
+      case 'weird':
+        return tags.any((tag) => tag.contains('weird') || tag.contains('unexpected') || tag.contains('strange'));
+      case 'highlight':
+        return candidate.sourceDiversity >= 2 || candidate.signalStrength >= 0.35;
       default:
         return false;
     }
@@ -435,7 +652,7 @@ class MultiSignalClipScorer {
     final sources = candidate.sources;
     double penalty = 0.0;
 
-    if ((mood == 'funny' || mood == 'sad' || mood == 'emotional' || mood == 'hook' || mood == 'info') &&
+    if ((mood == 'funny' || mood == 'happy' || mood == 'sad' || mood == 'emotional' || mood == 'romantic' || mood == 'angry' || mood == 'entertaining' || mood == 'hook' || mood == 'info') &&
         sources.length == 1 &&
         sources.contains(AiSignalSource.audioPeak)) {
       penalty += 0.35;
@@ -445,7 +662,10 @@ class MultiSignalClipScorer {
       penalty += 0.30;
     }
 
-    if (mood == 'funny' && !sources.contains(AiSignalSource.audioEvent) && !sources.contains(AiSignalSource.faceReaction) && !sources.contains(AiSignalSource.transcript)) {
+    if ((mood == 'funny' || mood == 'happy' || mood == 'romantic' || mood == 'angry' || mood == 'entertaining') &&
+        !sources.contains(AiSignalSource.audioEvent) &&
+        !sources.contains(AiSignalSource.faceReaction) &&
+        !sources.contains(AiSignalSource.transcript)) {
       penalty += 0.25;
     }
 
@@ -461,11 +681,16 @@ class MultiSignalClipScorer {
         return 22;
       case 'sad':
       case 'emotional':
+      case 'romantic':
+      case 'angry':
         return 24;
       case 'funny':
+      case 'happy':
+      case 'entertaining':
       case 'reaction':
         return 14;
       case 'action':
+      case 'fight':
       case 'viral':
         return 15;
       case 'music':
@@ -485,16 +710,21 @@ class MultiSignalClipScorer {
 
     switch (_canonicalMood(mood)) {
       case 'funny':
+      case 'happy':
         return const _ClipPadding(3, 4);
       case 'sad':
       case 'emotional':
+      case 'romantic':
+      case 'angry':
         return const _ClipPadding(4, 5);
       case 'hook':
       case 'info':
         return const _ClipPadding(3, 4);
       case 'action':
+      case 'fight':
         return const _ClipPadding(1, 4);
       case 'viral':
+      case 'entertaining':
       case 'reaction':
         return const _ClipPadding(2, 5);
       case 'music':
@@ -545,7 +775,28 @@ class MultiSignalClipScorer {
       case 'informative':
       case 'educational':
         return 'info';
+      case 'joy':
+      case 'joyful':
+      case 'celebration':
+      case 'celebrate':
+        return 'happy';
+      case 'love':
+      case 'romance':
+      case 'couple':
+        return 'romantic';
+      case 'mad':
+      case 'anger':
+      case 'argument':
+        return 'angry';
+      case 'fighting':
+      case 'combat':
+        return 'fight';
+      case 'entertainment':
+      case 'fun':
+      case 'interesting':
+        return 'entertaining';
       case 'strange':
+      case 'unexpected':
         return 'weird';
       default:
         return value;
@@ -560,12 +811,22 @@ class MultiSignalClipScorer {
     switch (_canonicalMood(mood)) {
       case 'funny':
         return 'Funny Clip';
+      case 'happy':
+        return 'Happy Clip';
       case 'sad':
         return 'Sad Clip';
+      case 'romantic':
+        return 'Romantic Clip';
+      case 'angry':
+        return 'Angry Clip';
       case 'emotional':
         return 'Emotional Clip';
       case 'action':
         return 'Action Clip';
+      case 'fight':
+        return 'Fight Clip';
+      case 'entertaining':
+        return 'Entertaining Clip';
       case 'reaction':
         return 'Reaction Clip';
       case 'hook':
@@ -606,6 +867,8 @@ class MultiSignalClipScorer {
   }) {
     final reasons = <String>[
       _publicReasonForMood(candidate.mood),
+      if (_categoryPrecisionScore(candidate, candidate.mood) >= _minPrecisionForMood(candidate.mood))
+        'The clip category was confirmed by enough matching evidence.',
       if (candidate.sourceDiversity >= 2) 'Multiple AI signals pointed to this same moment.',
       if (candidate.signals.any((signal) => signal.source == AiSignalSource.transcript))
         'Speech meaning helped identify this clip.',
@@ -638,12 +901,22 @@ class MultiSignalClipScorer {
     switch (_canonicalMood(mood)) {
       case 'funny':
         return 'This part has comedy, laughter, smile, or funny reaction evidence.';
+      case 'happy':
+        return 'This part has smile, celebration, joy, or positive reaction evidence.';
       case 'sad':
         return 'This part has sad, crying, loss, or serious emotional evidence.';
+      case 'romantic':
+        return 'This part has romantic, love, couple, wedding, or tender emotional evidence.';
+      case 'angry':
+        return 'This part has anger, argument, shouting, serious face, or conflict evidence.';
       case 'emotional':
         return 'This part has heartfelt or emotionally important evidence.';
       case 'action':
         return 'This part has motion, impact, scene change, or high action energy.';
+      case 'fight':
+        return 'This part has fight, hit, punch, attack, impact, or physical conflict evidence.';
+      case 'entertaining':
+        return 'This part has fun, retention, laughter, crowd, music, visual, or reaction evidence.';
       case 'reaction':
         return 'This part has reaction-style face, sound, or visual change evidence.';
       case 'hook':
@@ -667,9 +940,12 @@ class MultiSignalClipScorer {
       case 'info':
       case 'sad':
       case 'emotional':
+      case 'romantic':
+      case 'angry':
         return 6;
       case 'music':
       case 'action':
+      case 'fight':
       case 'weird':
         return 3;
       default:
@@ -683,10 +959,13 @@ class MultiSignalClipScorer {
       case 'info':
       case 'sad':
       case 'emotional':
+      case 'romantic':
+      case 'angry':
         return 45;
       case 'music':
         return 24;
       case 'action':
+      case 'fight':
       case 'weird':
         return 26;
       default:
@@ -701,13 +980,17 @@ class MultiSignalClipScorer {
         return 24;
       case 'sad':
       case 'emotional':
+      case 'romantic':
+      case 'angry':
         return 26;
       case 'music':
         return 14;
       case 'action':
+      case 'fight':
       case 'viral':
         return 15;
       case 'funny':
+      case 'happy':
       case 'reaction':
         return 15;
       case 'weird':
@@ -719,23 +1002,75 @@ class MultiSignalClipScorer {
 
   double _minScoreForMood(String mood) {
     switch (_canonicalMood(mood)) {
-      case 'hook':
-      case 'info':
       case 'funny':
-      case 'weird':
-        return 0.18;
+      case 'happy':
       case 'sad':
       case 'emotional':
+      case 'romantic':
+      case 'angry':
+      case 'weird':
+        return 0.34;
+      case 'hook':
+      case 'info':
+        return 0.32;
+      case 'action':
+      case 'fight':
+      case 'entertaining':
       case 'reaction':
       case 'music':
-        return 0.16;
-      case 'action':
       case 'viral':
-        return 0.14;
+        return 0.28;
       case 'highlight':
-        return 0.24;
+        return 0.36;
       default:
-        return 0.18;
+        return 0.32;
+    }
+  }
+
+  double _minPrecisionForMood(String mood) {
+    switch (_canonicalMood(mood)) {
+      case 'funny':
+      case 'happy':
+      case 'sad':
+      case 'emotional':
+      case 'romantic':
+      case 'angry':
+      case 'weird':
+        return 0.70;
+      case 'hook':
+      case 'info':
+        return 0.68;
+      case 'action':
+      case 'fight':
+      case 'entertaining':
+      case 'reaction':
+      case 'viral':
+        return 0.64;
+      case 'music':
+        return 0.62;
+      case 'highlight':
+        return 0.58;
+      default:
+        return 0.65;
+    }
+  }
+
+  double _minConfidenceForMood(String mood) {
+    switch (_canonicalMood(mood)) {
+      case 'funny':
+      case 'happy':
+      case 'sad':
+      case 'emotional':
+      case 'romantic':
+      case 'angry':
+      case 'hook':
+      case 'info':
+      case 'weird':
+        return 0.55;
+      case 'highlight':
+        return 0.50;
+      default:
+        return 0.48;
     }
   }
 
@@ -747,15 +1082,20 @@ class MultiSignalClipScorer {
 
   List<String> get _sectionOrder => const [
         'funny',
+        'happy',
         'sad',
         'emotional',
+        'romantic',
+        'angry',
         'action',
+        'fight',
+        'weird',
+        'entertaining',
         'reaction',
         'hook',
         'info',
         'music',
         'viral',
-        'weird',
         'highlight',
       ];
 

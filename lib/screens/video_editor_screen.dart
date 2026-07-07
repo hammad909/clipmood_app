@@ -10,6 +10,8 @@ import '../services/ai_clip_analyzer_service.dart';
 import '../services/ai_scan_cancellation_token.dart';
 import '../theme/app_theme.dart';
 import '../utils/time_formatter.dart';
+import '../widgets/ai_scan_progress_panel.dart';
+import '../widgets/app_loading_indicator.dart';
 import 'ai_clips_result_screen.dart';
 import 'saved_clips_screen.dart';
 
@@ -46,6 +48,11 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
   }
 
   Future<void> _setupVideo() async {
+    setState(() {
+      _hasError = false;
+      _isInitialized = false;
+    });
+
     try {
       final controller = VideoPlayerController.file(
         File(widget.video.path),
@@ -216,19 +223,18 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
 
   Widget _buildBody() {
     if (_hasError) {
-      return const Center(
-        child: Text(
-          'Could not load this video.',
-          style: TextStyle(color: AppColors.error),
-        ),
+      return AppErrorView(
+        message: 'Could not load this video.',
+        onRetry: _setupVideo,
       );
     }
 
     final controller = _controller;
 
     if (!_isInitialized || controller == null) {
-      return const Center(
-        child: CircularProgressIndicator(),
+      return const AppLoadingView(
+        message: 'Loading video...',
+        icon: Icons.movie_outlined,
       );
     }
 
@@ -359,11 +365,14 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
           ),
         ),
         const SizedBox(height: AppSpacing.lg),
-        _buildScanModeSelector(),
-        const SizedBox(height: AppSpacing.lg),
-        if (_isScanning)
-          _buildScanProgressPanel()
-        else ...[
+        if (_isScanning) ...[
+          AiScanProgressPanel(
+            progress: _scanProgress,
+            onCancel: _cancelAiScan,
+          ),
+        ] else ...[
+          _buildScanModeSelector(),
+          const SizedBox(height: AppSpacing.lg),
           FilledButton.icon(
             onPressed: _scanForAiClips,
             icon: const Icon(Icons.auto_awesome),
@@ -447,53 +456,5 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
       case AiScanMode.accurate:
         return Icons.workspace_premium;
     }
-  }
-
-  Widget _buildScanProgressPanel() {
-    final progress = _scanProgress.progress <= 0 || _scanProgress.progress >= 1
-        ? null
-        : _scanProgress.progress;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        LinearProgressIndicator(value: progress),
-        const SizedBox(height: AppSpacing.xl),
-        Text(
-          _scanProgress.stage.label,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          _scanProgress.message,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 15,
-          ),
-        ),
-        if (_scanProgress.detail != null) ...[
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            _scanProgress.detail!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: AppColors.textFaint,
-              fontSize: 13,
-            ),
-          ),
-        ],
-        const SizedBox(height: AppSpacing.xl),
-        OutlinedButton.icon(
-          onPressed: _scanProgress.canCancel ? _cancelAiScan : null,
-          icon: const Icon(Icons.stop_circle_outlined),
-          label: const Text('Cancel Scan'),
-        ),
-      ],
-    );
   }
 }

@@ -1,11 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
-import 'package:cross_file/cross_file.dart';
 import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
 import '../theme/app_theme.dart';
 import '../utils/time_formatter.dart';
+import '../widgets/app_loading_indicator.dart';
 
 class ClipPreviewScreen extends StatefulWidget {
   final String clipPath;
@@ -34,6 +34,11 @@ class _ClipPreviewScreenState extends State<ClipPreviewScreen> {
   }
 
   Future<void> _setupClip() async {
+    setState(() {
+      _hasError = false;
+      _isInitialized = false;
+    });
+
     try {
       final controller = VideoPlayerController.file(
         File(widget.clipPath),
@@ -184,17 +189,16 @@ class _ClipPreviewScreenState extends State<ClipPreviewScreen> {
 
   Widget _buildBody() {
     if (_hasError) {
-      return const Center(
-        child: Text(
-          'Could not load exported clip.',
-          style: TextStyle(color: AppColors.error),
-        ),
+      return AppErrorView(
+        message: 'Could not load exported clip.',
+        onRetry: _setupClip,
       );
     }
 
     if (!_isInitialized || _controller == null) {
-      return const Center(
-        child: CircularProgressIndicator(),
+      return const AppLoadingView(
+        message: 'Loading clip...',
+        icon: Icons.movie_outlined,
       );
     }
 

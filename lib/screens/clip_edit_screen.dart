@@ -1,14 +1,13 @@
 import 'dart:io';
 import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
-
 import '../models/ai_suggestion.dart';
 import '../models/selected_video.dart';
 import '../services/clip_export_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/time_formatter.dart';
+import '../widgets/app_loading_indicator.dart';
 import 'clip_preview_screen.dart';
 
 class ClipEditScreen extends StatefulWidget {
@@ -59,6 +58,11 @@ class _ClipEditScreenState extends State<ClipEditScreen> {
   }
 
   Future<void> _setupVideo() async {
+    setState(() {
+      _hasError = false;
+      _isInitialized = false;
+    });
+
     try {
       final controller = VideoPlayerController.file(
         File(widget.video.path),
@@ -248,19 +252,18 @@ class _ClipEditScreenState extends State<ClipEditScreen> {
 
   Widget _buildBody() {
     if (_hasError) {
-      return const Center(
-        child: Text(
-          'Could not load clip editor.',
-          style: TextStyle(color: AppColors.error),
-        ),
+      return AppErrorView(
+        message: 'Could not load clip editor.',
+        onRetry: _setupVideo,
       );
     }
 
     final controller = _controller;
 
     if (!_isInitialized || controller == null) {
-      return const Center(
-        child: CircularProgressIndicator(),
+      return const AppLoadingView(
+        message: 'Loading clip editor...',
+        icon: Icons.content_cut,
       );
     }
 
@@ -403,13 +406,35 @@ class _ClipEditScreenState extends State<ClipEditScreen> {
           _buildDurationCard(),
           const SizedBox(height: AppSpacing.xl),
           if (_isExporting) ...[
-            LinearProgressIndicator(
-              value: _exportProgress == 0.0 ? null : _exportProgress,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              'Exporting clip... ${(_exportProgress * 100).toStringAsFixed(0)}%',
-              style: const TextStyle(color: AppColors.textMuted),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              decoration: BoxDecoration(
+                color: AppColors.cardBackground,
+                borderRadius: AppRadius.lgRadius,
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                children: [
+                  AppLoadingIndicator(size: 48, icon: Icons.content_cut),
+                  const SizedBox(height: AppSpacing.md),
+                  ClipRRect(
+                    borderRadius: AppRadius.pillRadius,
+                    child: LinearProgressIndicator(
+                      value: _exportProgress == 0.0 ? null : _exportProgress,
+                      minHeight: 6,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Exporting clip... ${(_exportProgress * 100).toStringAsFixed(0)}%',
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ] else ...[
             SizedBox(

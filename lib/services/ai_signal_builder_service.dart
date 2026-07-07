@@ -1,5 +1,4 @@
 import 'dart:math';
-
 import '../models/ai_signal.dart';
 import '../models/clip_intent.dart';
 import '../models/face_reaction_signal.dart';
@@ -89,8 +88,11 @@ class AiSignalBuilderService {
         'laugh',
       ])) {
         moodScores['funny'] = max(moodScores['funny']!, value * 1.42);
+        moodScores['happy'] = max(moodScores['happy']!, value * 0.82);
+        moodScores['entertaining'] = max(moodScores['entertaining']!, value * 1.18);
         moodScores['reaction'] = max(moodScores['reaction']!, value * 1.02);
         tags.add('laughter');
+        tags.add('entertaining audio');
       }
 
       if (_containsAny(label, const [
@@ -123,6 +125,38 @@ class AiSignalBuilderService {
       }
 
       if (_containsAny(label, const [
+        'tender music',
+        'soft music',
+        'love song',
+        'romantic music',
+        'wedding music',
+        'humming',
+        'singing',
+        'choir',
+      ])) {
+        moodScores['romantic'] = max(moodScores['romantic']!, value * 1.10);
+        moodScores['emotional'] = max(moodScores['emotional']!, value * 0.76);
+        tags.add('romantic / tender audio');
+      }
+
+      if (_containsAny(label, const [
+        'yell',
+        'shout',
+        'scream',
+        'angry',
+        'argument',
+        'row',
+        'growling',
+        'roar',
+        'slam',
+        'smash',
+      ])) {
+        moodScores['angry'] = max(moodScores['angry']!, value * 1.18);
+        moodScores['reaction'] = max(moodScores['reaction']!, value * 0.72);
+        tags.add('angry / argument audio');
+      }
+
+      if (_containsAny(label, const [
         'gunshot',
         'explosion',
         'boom',
@@ -146,8 +180,11 @@ class AiSignalBuilderService {
         'thunder',
       ])) {
         moodScores['action'] = max(moodScores['action']!, value * 1.45);
+        moodScores['fight'] = max(moodScores['fight']!, value * 1.22);
+        moodScores['angry'] = max(moodScores['angry']!, value * 0.62);
         moodScores['viral'] = max(moodScores['viral']!, value * 0.90);
         tags.add('action sound');
+        tags.add('fight / impact sound');
       }
 
       if (_containsAny(label, const [
@@ -178,9 +215,12 @@ class AiSignalBuilderService {
         'chant',
       ])) {
         moodScores['viral'] = max(moodScores['viral']!, value * 1.30);
+        moodScores['happy'] = max(moodScores['happy']!, value * 1.08);
+        moodScores['entertaining'] = max(moodScores['entertaining']!, value * 1.12);
         moodScores['reaction'] = max(moodScores['reaction']!, value * 1.02);
         moodScores['action'] = max(moodScores['action']!, value * 0.62);
         tags.add('crowd / hype');
+        tags.add('happy / celebration audio');
       }
 
       if (_containsAny(label, const [
@@ -211,6 +251,14 @@ class AiSignalBuilderService {
       ])) {
         moodScores['music'] = max(moodScores['music']!, value * 1.22);
         moodScores['exciting'] = max(moodScores['exciting']!, value * 1.02);
+        moodScores['entertaining'] = max(moodScores['entertaining']!, value * 0.84);
+        if (_containsAny(label, const ['singing', 'song'])) {
+          moodScores['romantic'] = max(moodScores['romantic']!, value * 0.56);
+        }
+        if (_containsAny(label, const ['dance', 'singing'])) {
+          moodScores['happy'] = max(moodScores['happy']!, value * 0.68);
+          tags.add('happy music / dance');
+        }
         tags.add('music');
       }
 
@@ -423,6 +471,149 @@ class AiSignalBuilderService {
       text: text,
       moodScores: moodScores,
       tags: tags,
+      mood: 'happy',
+      tag: 'happy wording',
+      value: 0.32,
+      patterns: const [
+        'happy',
+        'smile',
+        'smiling',
+        'laughing',
+        'celebrate',
+        'celebration',
+        'excited',
+        'joy',
+        'proud moment',
+        'we did it',
+        'finally did it',
+        'best day',
+        'good news',
+        'congratulations',
+        'congrats',
+      ],
+    );
+
+    _addTextScore(
+      text: text,
+      moodScores: moodScores,
+      tags: tags,
+      mood: 'romantic',
+      tag: 'romantic wording',
+      value: 0.35,
+      patterns: const [
+        'love you',
+        'i love',
+        'romantic',
+        'romance',
+        'couple',
+        'crush',
+        'date',
+        'dating',
+        'marry',
+        'marriage',
+        'wedding',
+        'kiss',
+        'hug',
+        'valentine',
+        'my heart',
+        'forever with you',
+        'pyar',
+        'pyaar',
+        'mohabbat',
+        'ishq',
+        'dil',
+        'shaadi',
+      ],
+    );
+
+    _addTextScore(
+      text: text,
+      moodScores: moodScores,
+      tags: tags,
+      mood: 'angry',
+      tag: 'angry wording',
+      value: 0.35,
+      patterns: const [
+        'angry',
+        'mad at you',
+        'shut up',
+        'get out',
+        'hate you',
+        'i hate',
+        'don\'t talk to me',
+        'leave me alone',
+        'argument',
+        'fight with me',
+        'how dare you',
+        'stop it',
+        'gussa',
+        'ghussa',
+        'naraz',
+        'bad tameez',
+        'chup',
+      ],
+    );
+
+    _addTextScore(
+      text: text,
+      moodScores: moodScores,
+      tags: tags,
+      mood: 'fight',
+      tag: 'fight wording',
+      value: 0.36,
+      patterns: const [
+        'fight',
+        'fighting',
+        'punch',
+        'kick',
+        'slap',
+        'hit him',
+        'hit her',
+        'attack',
+        'beat him',
+        'beat her',
+        'knockout',
+        'ko',
+        'wrestle',
+        'boxing',
+        'larai',
+        'ladai',
+        'maar',
+        'maro',
+        'thappar',
+      ],
+    );
+
+    _addTextScore(
+      text: text,
+      moodScores: moodScores,
+      tags: tags,
+      mood: 'entertaining',
+      tag: 'entertaining wording',
+      value: 0.31,
+      patterns: const [
+        'entertaining',
+        'fun to watch',
+        'best part',
+        'watch this',
+        'this is crazy',
+        'this is insane',
+        'amazing',
+        'awesome',
+        'wow',
+        'wild',
+        'unexpected',
+        'mazay',
+        'maza',
+        'zabardast',
+        'kamal',
+      ],
+    );
+
+    _addTextScore(
+      text: text,
+      moodScores: moodScores,
+      tags: tags,
       mood: 'sad',
       tag: 'sad wording',
       value: 0.34,
@@ -571,7 +762,16 @@ class AiSignalBuilderService {
     moodScores['action'] = (signal.motionScore * 0.66) +
         (signal.sceneChangeScore * 0.30) +
         (signal.visualEnergyScore * 0.32);
+    moodScores['fight'] = (signal.motionScore * 0.52) +
+        (signal.sceneChangeScore * 0.20) +
+        (signal.visualEnergyScore * 0.18);
+    moodScores['entertaining'] = (signal.visualEnergyScore * 0.42) +
+        (signal.motionScore * 0.24) +
+        (signal.sceneChangeScore * 0.16);
     moodScores['viral'] = (signal.visualEnergyScore * 0.58) + (signal.motionScore * 0.28);
+    moodScores['happy'] = (signal.visualEnergyScore * 0.18) +
+        (signal.brightnessScore * 0.10) +
+        (signal.brightnessChangeScore * 0.08);
     moodScores['music'] = (signal.sceneChangeScore * 0.42) +
         (signal.brightnessChangeScore * 0.26) +
         (signal.visualEnergyScore * 0.25);
@@ -638,6 +838,9 @@ class AiSignalBuilderService {
         (signal.headMovementScore * 0.12);
     moodScores['funny'] = (signal.smilingScore * 0.88) +
         (signal.reactionScore * 0.24);
+    moodScores['happy'] = (signal.smilingScore * 0.92) +
+        (signal.facePresenceScore * 0.14) +
+        (signal.reactionScore * 0.18);
     moodScores['sad'] = ((1.0 - signal.smilingScore) * 0.18) +
         (signal.eyeExpressionScore * 0.18) +
         (signal.headMovementScore * 0.12);
@@ -645,6 +848,13 @@ class AiSignalBuilderService {
         (signal.headMovementScore * 0.22) +
         (signal.facePresenceScore * 0.16) +
         (signal.eyeExpressionScore * 0.10);
+    moodScores['angry'] = ((1.0 - signal.smilingScore) * 0.20) +
+        (signal.headMovementScore * 0.20) +
+        (signal.eyeExpressionScore * 0.18) +
+        (signal.reactionScore * 0.18);
+    moodScores['entertaining'] = (signal.reactionScore * 0.44) +
+        (signal.smilingScore * 0.36) +
+        (signal.faceChangeScore * 0.20);
     moodScores['viral'] = (signal.reactionScore * 0.48) +
         (signal.faceChangeScore * 0.30) +
         (signal.facePresenceScore * 0.14);
@@ -664,10 +874,13 @@ class AiSignalBuilderService {
       if (signal.faceCount == 1) 'face detected',
       if (signal.faceCount > 1) '${signal.faceCount} faces detected',
       if (signal.smilingScore >= 0.35) 'smile / laugh face',
+      if (signal.smilingScore >= 0.45) 'happy face',
       if (signal.faceChangeScore >= 0.22) 'reaction change',
       if (signal.headMovementScore >= 0.25) 'head movement',
       if (signal.eyeExpressionScore >= 0.25) 'eye expression',
       if (signal.reactionScore >= 0.35) 'strong face reaction',
+      if (signal.smilingScore <= 0.12 && signal.headMovementScore >= 0.22) 'angry / serious face',
+      if (signal.reactionScore >= 0.35 && signal.smilingScore >= 0.25) 'entertaining reaction',
     ];
 
     return AiSignal(
@@ -684,7 +897,7 @@ class AiSignalBuilderService {
       reasons: [
         'On-device face/reaction detector found expressive visual evidence',
         'Best face/reaction category: ${best.key}',
-        'Useful for funny, sad, emotional, reaction, and viral clips',
+        'Useful for funny, happy, sad, emotional, romantic, angry, entertaining, reaction, and viral clips',
       ],
       metadata: {
         'face_count': signal.faceCount,
@@ -700,15 +913,20 @@ class AiSignalBuilderService {
   Map<String, double> _emptyMoodScores({double highlight = 0.0}) {
     return {
       'funny': 0,
+      'happy': 0,
       'sad': 0,
+      'romantic': 0,
+      'angry': 0,
       'emotional': 0,
       'action': 0,
+      'fight': 0,
+      'weird': 0,
+      'entertaining': 0,
       'hook': 0,
       'music': 0,
       'exciting': 0,
       'viral': 0,
       'reaction': 0,
-      'weird': 0,
       'info': 0,
       'highlight': highlight,
     };
@@ -718,15 +936,22 @@ class AiSignalBuilderService {
     switch (intent) {
       case ClipIntent.action:
         return 'action';
+      case ClipIntent.fight:
+        return 'fight';
       case ClipIntent.sportsHighEnergy:
+      case ClipIntent.entertaining:
         return 'viral';
       case ClipIntent.musicEdit:
         return 'music';
       case ClipIntent.general:
         return 'viral';
       case ClipIntent.funny:
+      case ClipIntent.happy:
       case ClipIntent.sad:
       case ClipIntent.emotional:
+      case ClipIntent.romantic:
+      case ClipIntent.angry:
+      case ClipIntent.weird:
       case ClipIntent.podcastHook:
       case ClipIntent.reaction:
         return null;
@@ -746,14 +971,27 @@ class AiSignalBuilderService {
     switch (intent) {
       case ClipIntent.funny:
         boost('funny', 1.85);
+        boost('happy', 0.78);
+        boost('entertaining', 1.06);
         boost('reaction', 1.18);
         boost('hook', 0.70);
         boost('sad', 0.28);
         boost('emotional', 0.42);
+        boost('angry', 0.22);
+        break;
+      case ClipIntent.happy:
+        boost('happy', 2.00);
+        boost('funny', 1.05);
+        boost('entertaining', 1.15);
+        boost('reaction', 0.95);
+        boost('viral', 0.92);
+        boost('sad', 0.18);
+        boost('angry', 0.22);
         break;
       case ClipIntent.sad:
         boost('sad', 2.05);
         boost('emotional', 1.18);
+        boost('happy', 0.22);
         boost('hook', 0.82);
         boost('funny', 0.22);
         boost('viral', 0.45);
@@ -761,21 +999,69 @@ class AiSignalBuilderService {
       case ClipIntent.emotional:
         boost('emotional', 1.95);
         boost('sad', 1.15);
+        boost('romantic', 0.88);
+        boost('happy', 0.45);
         boost('hook', 0.86);
         boost('funny', 0.32);
         boost('viral', 0.56);
         break;
+      case ClipIntent.romantic:
+        boost('romantic', 2.05);
+        boost('emotional', 1.12);
+        boost('happy', 0.85);
+        boost('music', 0.80);
+        boost('sad', 0.35);
+        boost('angry', 0.12);
+        boost('fight', 0.10);
+        break;
+      case ClipIntent.angry:
+        boost('angry', 2.08);
+        boost('fight', 1.22);
+        boost('reaction', 1.05);
+        boost('action', 0.88);
+        boost('funny', 0.18);
+        boost('happy', 0.14);
+        boost('romantic', 0.10);
+        break;
       case ClipIntent.action:
         boost('action', 2.05);
+        boost('fight', 1.05);
         boost('viral', 1.24);
+        boost('happy', 0.52);
         boost('reaction', 1.18);
         boost('music', 0.62);
         boost('sad', 0.32);
         boost('emotional', 0.35);
         break;
+      case ClipIntent.fight:
+        boost('fight', 2.12);
+        boost('action', 1.38);
+        boost('angry', 1.08);
+        boost('viral', 0.95);
+        boost('reaction', 0.92);
+        boost('happy', 0.10);
+        boost('romantic', 0.08);
+        break;
+      case ClipIntent.weird:
+        boost('weird', 2.02);
+        boost('reaction', 1.05);
+        boost('entertaining', 0.84);
+        boost('funny', 0.72);
+        boost('happy', 0.35);
+        break;
+      case ClipIntent.entertaining:
+        boost('entertaining', 1.95);
+        boost('funny', 1.18);
+        boost('happy', 1.08);
+        boost('viral', 1.02);
+        boost('reaction', 1.02);
+        boost('music', 0.96);
+        boost('action', 0.72);
+        break;
       case ClipIntent.podcastHook:
         boost('hook', 2.10);
         boost('highlight', 1.15);
+        boost('happy', 0.56);
         boost('viral', 0.70);
         boost('funny', 0.45);
         boost('action', 0.45);
@@ -783,6 +1069,9 @@ class AiSignalBuilderService {
       case ClipIntent.sportsHighEnergy:
         boost('viral', 1.92);
         boost('action', 1.45);
+        boost('fight', 0.92);
+        boost('happy', 1.05);
+        boost('entertaining', 1.10);
         boost('reaction', 1.32);
         boost('exciting', 1.20);
         boost('music', 0.82);
@@ -791,6 +1080,9 @@ class AiSignalBuilderService {
       case ClipIntent.musicEdit:
         boost('music', 2.00);
         boost('exciting', 1.62);
+        boost('entertaining', 1.05);
+        boost('happy', 0.92);
+        boost('romantic', 0.55);
         boost('viral', 1.12);
         boost('reaction', 0.72);
         boost('hook', 0.40);
@@ -798,17 +1090,24 @@ class AiSignalBuilderService {
       case ClipIntent.reaction:
         boost('reaction', 1.92);
         boost('funny', 1.15);
+        boost('happy', 0.98);
         boost('viral', 1.10);
         boost('sad', 1.02);
+        boost('angry', 1.02);
         boost('emotional', 0.98);
         boost('action', 0.92);
         break;
       case ClipIntent.general:
         boost('highlight', 0.82);
         boost('funny', 1.08);
+        boost('happy', 1.07);
         boost('sad', 1.06);
         boost('emotional', 1.06);
         boost('action', 1.08);
+        boost('fight', 1.07);
+        boost('romantic', 1.04);
+        boost('angry', 1.05);
+        boost('entertaining', 1.08);
         boost('hook', 1.07);
         boost('info', 1.07);
         boost('music', 1.05);
@@ -826,25 +1125,38 @@ class AiSignalBuilderService {
   double _sourceWeightForIntent(AiSignalSource source, ClipIntent intent) {
     switch (source) {
       case AiSignalSource.transcript:
-        return intent == ClipIntent.podcastHook ? 1.60 : 1.25;
+        return intent == ClipIntent.podcastHook ||
+                intent == ClipIntent.romantic ||
+                intent == ClipIntent.angry
+            ? 1.60
+            : 1.25;
       case AiSignalSource.faceReaction:
         return intent == ClipIntent.reaction ||
                 intent == ClipIntent.funny ||
+                intent == ClipIntent.happy ||
                 intent == ClipIntent.sad ||
-                intent == ClipIntent.emotional
+                intent == ClipIntent.emotional ||
+                intent == ClipIntent.angry ||
+                intent == ClipIntent.entertaining
             ? 1.55
             : 1.22;
       case AiSignalSource.audioEvent:
         return intent == ClipIntent.funny ||
+                intent == ClipIntent.happy ||
                 intent == ClipIntent.sportsHighEnergy ||
                 intent == ClipIntent.action ||
+                intent == ClipIntent.fight ||
+                intent == ClipIntent.angry ||
+                intent == ClipIntent.entertaining ||
                 intent == ClipIntent.sad
             ? 1.30
             : 1.10;
       case AiSignalSource.audioPeak:
         return intent == ClipIntent.musicEdit ||
                 intent == ClipIntent.sportsHighEnergy ||
-                intent == ClipIntent.action
+                intent == ClipIntent.action ||
+                intent == ClipIntent.fight ||
+                intent == ClipIntent.entertaining
             ? 1.10
             : 0.82;
       case AiSignalSource.sceneChange:
@@ -856,7 +1168,9 @@ class AiSignalBuilderService {
       case AiSignalSource.visualMotion:
         return intent == ClipIntent.reaction ||
                 intent == ClipIntent.sportsHighEnergy ||
-                intent == ClipIntent.action
+                intent == ClipIntent.action ||
+                intent == ClipIntent.fight ||
+                intent == ClipIntent.entertaining
             ? 1.15
             : 0.90;
       case AiSignalSource.userFeedback:

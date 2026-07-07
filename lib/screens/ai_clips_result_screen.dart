@@ -1,14 +1,15 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
-
 import '../models/ai_suggestion.dart';
 import '../models/selected_video.dart';
 import '../services/clip_export_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/time_formatter.dart';
 import '../widgets/ai_suggestion_card.dart';
+import '../widgets/app_loading_indicator.dart';
 import 'clip_edit_screen.dart';
+import 'manual_trim_screen.dart';
 import 'saved_clips_screen.dart';
 
 class AiClipsResultScreen extends StatefulWidget {
@@ -60,6 +61,11 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
   }
 
   Future<void> _setupVideo() async {
+    setState(() {
+      _hasError = false;
+      _isInitialized = false;
+    });
+
     try {
       final controller = VideoPlayerController.file(File(widget.video.path));
       await controller.initialize();
@@ -122,6 +128,18 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
           video: widget.video,
           suggestion: suggestion,
         ),
+      ),
+    );
+  }
+
+
+  Future<void> _openManualTrim() async {
+    await _controller?.pause();
+    if (!mounted) return;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ManualTrimScreen(video: widget.video),
       ),
     );
   }
@@ -270,14 +288,55 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('AI Clip Sections (${widget.suggestions.length})'),
-        actions: [
-          IconButton(
-            tooltip: 'Saved Clips',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SavedClipsScreen()),
+        centerTitle: false,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('AI Results'),
+            Text(
+              '${widget.suggestions.length} clip section${widget.suggestions.length == 1 ? '' : 's'} found',
+              style: const TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            icon: const Icon(Icons.video_library),
+          ],
+        ),
+        actions: [
+          PopupMenuButton<_ResultMenuAction>(
+            tooltip: 'More actions',
+            onSelected: (action) {
+              switch (action) {
+                case _ResultMenuAction.manualTrim:
+                  _openManualTrim();
+                  break;
+                case _ResultMenuAction.savedClips:
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SavedClipsScreen()),
+                  );
+                  break;
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: _ResultMenuAction.manualTrim,
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.content_cut),
+                  title: Text('Manual Trim'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _ResultMenuAction.savedClips,
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.video_library_outlined),
+                  title: Text('Saved Clips'),
+                ),
+              ),
+            ],
           ),
           const SizedBox(width: AppSpacing.xs),
         ],
@@ -288,18 +347,19 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
 
   Widget _buildBody() {
     if (_hasError) {
-      return const Center(
-        child: Text(
-          'Could not load this video.',
-          style: TextStyle(color: AppColors.error),
-        ),
+      return AppErrorView(
+        message: 'Could not load this video.',
+        onRetry: _setupVideo,
       );
     }
 
     final controller = _controller;
 
     if (!_isInitialized || controller == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const AppLoadingView(
+        message: 'Loading video...',
+        icon: Icons.movie_outlined,
+      );
     }
 
     return OrientationBuilder(
@@ -616,26 +676,39 @@ class _BatchSaveProgressDialog extends StatelessWidget {
               final overall = value.total == 0
                   ? 0.0
                   : (value.index + value.clipProgress) / value.total;
+              final color = Theme.of(context).colorScheme.primary;
 
               return Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  AppLoadingIndicator(size: 52, icon: Icons.save_alt),
+                  const SizedBox(height: AppSpacing.lg),
                   const Text(
                     'Saving Clips',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
                   ),
-                  const SizedBox(height: AppSpacing.sm),
+                  const SizedBox(height: AppSpacing.xs),
                   Text(
                     'Clip ${value.index + 1} of ${value.total}',
                     style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
                   ),
-                  const SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.lg),
                   ClipRRect(
                     borderRadius: AppRadius.pillRadius,
                     child: LinearProgressIndicator(
                       value: overall.clamp(0.0, 1.0),
                       minHeight: 8,
+                      backgroundColor: AppColors.border,
+                      valueColor: AlwaysStoppedAnimation<Color>(color),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    '${(overall.clamp(0.0, 1.0) * 100).round()}% complete',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                   const SizedBox(height: AppSpacing.md),
@@ -659,6 +732,11 @@ class _BatchSaveProgressDialog extends StatelessWidget {
   }
 }
 
+enum _ResultMenuAction {
+  manualTrim,
+  savedClips,
+}
+
 class _ClipSection {
   final String label;
   final IconData icon;
@@ -678,26 +756,34 @@ class _ClipSection {
         return const _ClipSection(label: 'Sad', icon: Icons.sentiment_dissatisfied, order: 1);
       case 'emotional':
         return const _ClipSection(label: 'Emotional', icon: Icons.favorite, order: 2);
+      case 'romantic':
+        return const _ClipSection(label: 'Romantic', icon: Icons.favorite_border, order: 3);
+      case 'angry':
+        return const _ClipSection(label: 'Angry / Argument', icon: Icons.sentiment_very_dissatisfied, order: 4);
       case 'action':
-        return const _ClipSection(label: 'Action', icon: Icons.bolt, order: 3);
+        return const _ClipSection(label: 'Action', icon: Icons.bolt, order: 5);
+      case 'fight':
+        return const _ClipSection(label: 'Fight', icon: Icons.sports_mma, order: 6);
+      case 'weird':
+      case 'strange':
+        return const _ClipSection(label: 'Weird / Unexpected', icon: Icons.psychology_alt, order: 7);
+      case 'entertaining':
+        return const _ClipSection(label: 'Entertaining', icon: Icons.theater_comedy, order: 8);
       case 'reaction':
-        return const _ClipSection(label: 'Reaction', icon: Icons.face_retouching_natural, order: 4);
+        return const _ClipSection(label: 'Reaction', icon: Icons.face_retouching_natural, order: 9);
       case 'hook':
-        return const _ClipSection(label: 'Hooks / Quotes', icon: Icons.format_quote, order: 5);
+        return const _ClipSection(label: 'Hooks / Quotes', icon: Icons.format_quote, order: 10);
       case 'info':
       case 'informative':
       case 'information':
-        return const _ClipSection(label: 'Informative', icon: Icons.lightbulb_outline, order: 6);
+        return const _ClipSection(label: 'Informative', icon: Icons.lightbulb_outline, order: 11);
       case 'music':
       case 'exciting':
-        return const _ClipSection(label: 'Music / Edit', icon: Icons.music_note, order: 7);
+        return const _ClipSection(label: 'Music / Edit', icon: Icons.music_note, order: 12);
       case 'viral':
-        return const _ClipSection(label: 'High Energy', icon: Icons.local_fire_department, order: 8);
-      case 'weird':
-      case 'strange':
-        return const _ClipSection(label: 'Weird / Unexpected', icon: Icons.psychology_alt, order: 9);
+        return const _ClipSection(label: 'High Energy', icon: Icons.local_fire_department, order: 13);
       default:
-        return const _ClipSection(label: 'Highlights', icon: Icons.auto_awesome, order: 10);
+        return const _ClipSection(label: 'Highlights', icon: Icons.auto_awesome, order: 14);
     }
   }
 
