@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
+import '../services/ad_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/time_formatter.dart';
 import '../widgets/app_loading_indicator.dart';
+import '../widgets/free_banner_ad.dart';
 
 class ClipPreviewScreen extends StatefulWidget {
   final String clipPath;
@@ -112,6 +114,8 @@ class _ClipPreviewScreenState extends State<ClipPreviewScreen> {
           content: Text('Clip saved to gallery.'),
         ),
       );
+
+      AdService.instance.maybeShowInterstitialAfterExport();
     } catch (e) {
       if (!mounted) return;
 
@@ -184,6 +188,16 @@ class _ClipPreviewScreenState extends State<ClipPreviewScreen> {
       body: SafeArea(
         child: _buildBody(),
       ),
+      bottomNavigationBar: const SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: AppSpacing.xs),
+          child: FreeBannerAd(
+            placement: 'clip_preview_bottom',
+            showLabel: true,
+          ),
+        ),
+      ),
     );
   }
 
@@ -204,166 +218,173 @@ class _ClipPreviewScreenState extends State<ClipPreviewScreen> {
 
     final controller = _controller!;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double videoHeight = constraints.maxHeight * 0.55;
-
-        return Column(
-          children: [
-            Container(
-              width: double.infinity,
-              height: videoHeight,
-              color: Colors.black,
-              child: Center(
-                child: AspectRatio(
-                  aspectRatio: controller.value.aspectRatio,
-                  child: VideoPlayer(controller),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: AppSpacing.md),
-
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: Row(
-                children: [
-                  Text(
-                    TimeFormatter.formatDuration(controller.value.position),
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                  Expanded(
-                    child: VideoProgressIndicator(
-                      controller,
-                      allowScrubbing: true,
-                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+    // The video + metadata section can be taller than the available space on
+    // smaller screens (e.g. tall aspect-ratio clips, larger text scales), so
+    // it scrolls independently while the Save/Share/Done actions stay
+    // pinned below it. This avoids the bottom overflow that a fixed-height
+    // Column + Spacer combination would hit once content no longer fits.
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  height: MediaQuery.sizeOf(context).height * 0.4,
+                  color: Colors.black,
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: controller.value.aspectRatio,
+                      child: VideoPlayer(controller),
                     ),
                   ),
-                  Text(
-                    TimeFormatter.formatDuration(controller.value.duration),
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: AppSpacing.xl),
-
-            IconButton.filled(
-              iconSize: 42,
-              onPressed: _togglePlayPause,
-              icon: Icon(
-                controller.value.isPlaying
-                    ? Icons.pause
-                    : Icons.play_arrow,
-              ),
-            ),
-
-            const SizedBox(height: AppSpacing.xl),
-
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(AppSpacing.md),
-                decoration: BoxDecoration(
-                  color: AppColors.cardBackground,
-                  borderRadius: AppRadius.mdRadius,
-                  border: Border.all(color: AppColors.border),
                 ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.check_circle,
-                      color: AppColors.success,
-                      size: 18,
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Text(
-                        widget.clipPath.split(Platform.pathSeparator).last,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
 
-            const Spacer(),
+                const SizedBox(height: AppSpacing.md),
 
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.sm,
-                AppSpacing.lg,
-                AppSpacing.lg,
-              ),
-              child: Column(
-                children: [
-                  Row(
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                  child: Row(
                     children: [
+                      Text(
+                        TimeFormatter.formatDuration(controller.value.position),
+                        style: const TextStyle(fontSize: 13),
+                      ),
                       Expanded(
-                        child: FilledButton.icon(
-                          onPressed: _isSaving ? null : _saveToGallery,
-                          icon: _isSaving
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.download),
-                          label: const Text('Save'),
+                        child: VideoProgressIndicator(
+                          controller,
+                          allowScrubbing: true,
+                          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                         ),
                       ),
-
-                      const SizedBox(width: AppSpacing.md),
-
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: _isSharing ? null : _shareClip,
-                          icon: _isSharing
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.share),
-                          label: const Text('Share'),
-                        ),
+                      Text(
+                        TimeFormatter.formatDuration(controller.value.duration),
+                        style: const TextStyle(fontSize: 13),
                       ),
                     ],
                   ),
+                ),
 
-                  const SizedBox(height: AppSpacing.md),
+                const SizedBox(height: AppSpacing.xl),
 
-                  SizedBox(
+                IconButton.filled(
+                  iconSize: 42,
+                  onPressed: _togglePlayPause,
+                  icon: Icon(
+                    controller.value.isPlaying
+                        ? Icons.pause
+                        : Icons.play_arrow,
+                  ),
+                ),
+
+                const SizedBox(height: AppSpacing.xl),
+
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                  child: Container(
                     width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                      },
-                      icon: const Icon(Icons.check),
-                      label: const Text('Done'),
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardBackground,
+                      borderRadius: AppRadius.mdRadius,
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.check_circle,
+                          color: AppColors.success,
+                          size: 18,
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: Text(
+                            widget.clipPath.split(Platform.pathSeparator).last,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: AppSpacing.lg),
+              ],
+            ),
+          ),
+        ),
+
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.sm,
+            AppSpacing.lg,
+            AppSpacing.lg,
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _isSaving ? null : _saveToGallery,
+                      icon: _isSaving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.download),
+                      label: const Text('Save'),
+                    ),
+                  ),
+
+                  const SizedBox(width: AppSpacing.md),
+
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _isSharing ? null : _shareClip,
+                      icon: _isSharing
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.share),
+                      label: const Text('Share'),
                     ),
                   ),
                 ],
               ),
-            ),
-          ],
-        );
-      },
+
+              const SizedBox(height: AppSpacing.md),
+
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  icon: const Icon(Icons.check),
+                  label: const Text('Done'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

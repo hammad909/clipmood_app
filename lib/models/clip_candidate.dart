@@ -1,4 +1,5 @@
 import 'dart:math';
+
 import 'ai_signal.dart';
 import 'ai_suggestion.dart';
 
@@ -10,6 +11,8 @@ class ClipCandidate {
   final double score;
   final double confidence;
   final double categoryPrecision;
+  final Map<String, double> categoryScores;
+  final Map<String, String> logicJustifications;
   final List<AiSignal> signals;
   final List<String> reasons;
 
@@ -21,6 +24,8 @@ class ClipCandidate {
     required this.score,
     required this.confidence,
     this.categoryPrecision = 0.0,
+    this.categoryScores = const {},
+    this.logicJustifications = const {},
     this.signals = const [],
     this.reasons = const [],
   });
@@ -28,6 +33,38 @@ class ClipCandidate {
   int get durationSeconds => endSeconds - startSeconds;
 
   bool get isValid => endSeconds > startSeconds && durationSeconds >= 2;
+
+  String get topCategory {
+    if (categoryScores.isEmpty) return mood;
+    final sorted = categoryScores.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return sorted.first.key;
+  }
+
+  double get topCategoryScore {
+    if (categoryScores.isEmpty) return 0.0;
+    final sorted = categoryScores.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return sorted.first.value.clamp(0.0, 1.0).toDouble();
+  }
+
+  double categoryScoreFor(String category) {
+    return (categoryScores[category] ?? 0.0).clamp(0.0, 1.0).toDouble();
+  }
+
+  double secondCategoryScoreFor(String category) {
+    final sorted = categoryScores.entries
+        .where((entry) => entry.key != category)
+        .toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return sorted.isEmpty ? 0.0 : sorted.first.value.clamp(0.0, 1.0).toDouble();
+  }
+
+  double dominanceGapFor(String category) {
+    return (categoryScoreFor(category) - secondCategoryScoreFor(category))
+        .clamp(0.0, 1.0)
+        .toDouble();
+  }
 
   Set<AiSignalSource> get sources {
     return signals.map((signal) => signal.source).toSet();
@@ -88,6 +125,8 @@ class ClipCandidate {
       score: max(score, other.score) + 0.04,
       confidence: max(confidence, other.confidence),
       categoryPrecision: max(categoryPrecision, other.categoryPrecision),
+      categoryScores: _mergeScoreMaps(categoryScores, other.categoryScores),
+      logicJustifications: _mergeStringMaps(logicJustifications, other.logicJustifications),
       signals: mergedSignals,
       reasons: _uniqueStrings([
         ...reasons,
@@ -107,6 +146,8 @@ class ClipCandidate {
       score: score.clamp(0.0, 1.0).toDouble(),
       categoryPrecision: categoryPrecision.clamp(0.0, 1.0).toDouble(),
       sourceDiversity: sourceDiversity,
+      categoryScores: categoryScores,
+      logicJustifications: logicJustifications,
       reason: _uniqueStrings(reasons).take(6).toList(),
     );
   }
@@ -119,6 +160,8 @@ class ClipCandidate {
     double? score,
     double? confidence,
     double? categoryPrecision,
+    Map<String, double>? categoryScores,
+    Map<String, String>? logicJustifications,
     List<AiSignal>? signals,
     List<String>? reasons,
   }) {
@@ -130,9 +173,36 @@ class ClipCandidate {
       score: score ?? this.score,
       confidence: confidence ?? this.confidence,
       categoryPrecision: categoryPrecision ?? this.categoryPrecision,
+      categoryScores: categoryScores ?? this.categoryScores,
+      logicJustifications: logicJustifications ?? this.logicJustifications,
       signals: signals ?? this.signals,
       reasons: reasons ?? this.reasons,
     );
+  }
+
+  static Map<String, double> _mergeScoreMaps(
+    Map<String, double> first,
+    Map<String, double> second,
+  ) {
+    if (first.isEmpty) return second;
+    if (second.isEmpty) return first;
+
+    final result = <String, double>{...first};
+    for (final entry in second.entries) {
+      final existing = result[entry.key] ?? 0.0;
+      result[entry.key] = max(existing, entry.value).clamp(0.0, 1.0).toDouble();
+    }
+    return result;
+  }
+
+  static Map<String, String> _mergeStringMaps(
+    Map<String, String> first,
+    Map<String, String> second,
+  ) {
+    if (first.isEmpty) return second;
+    if (second.isEmpty) return first;
+
+    return <String, String>{...second, ...first};
   }
 
   static List<String> _uniqueStrings(List<String> values) {

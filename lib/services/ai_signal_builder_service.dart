@@ -281,6 +281,7 @@ class AiSignalBuilderService {
         strength: 0.05,
         confidence: silencePenalty,
         weight: 1.0,
+        categoryScores: const {'silence': 0.05},
         tags: const ['silence'],
         reasons: const ['Rejected/down-ranked because YAMNet detected mostly silence'],
         isNegative: true,
@@ -298,6 +299,7 @@ class AiSignalBuilderService {
       strength: strength,
       confidence: max(topPredictionScore, window.highlightScore).clamp(0.0, 1.0).toDouble(),
       weight: _sourceWeightForIntent(AiSignalSource.audioEvent, intent),
+      categoryScores: _filteredCategoryScores(weightedScores),
       tags: _uniqueStrings(tags).take(6).toList(),
       reasons: [
         'YAMNet detected useful audio event(s)',
@@ -342,6 +344,10 @@ class AiSignalBuilderService {
       strength: max(strength, peak.score.clamp(0.0, 1.0).toDouble()),
       confidence: peak.score >= 0.18 ? 0.78 : 0.58,
       weight: _sourceWeightForIntent(AiSignalSource.audioPeak, intent),
+      categoryScores: _singleCategoryScore(
+        peakMood,
+        max(strength, peak.score.clamp(0.0, 1.0).toDouble()),
+      ),
       tags: const ['loudness peak'],
       reasons: const [
         'Audio peak detected',
@@ -739,6 +745,7 @@ class AiSignalBuilderService {
       strength: strength,
       confidence: segment.confidence.clamp(0.0, 1.0).toDouble(),
       weight: _sourceWeightForIntent(AiSignalSource.transcript, intent),
+      categoryScores: _filteredCategoryScores(weightedScores),
       tags: _uniqueStrings(tags).take(7).toList(),
       reasons: [
         'Transcript text contains useful meaning',
@@ -809,6 +816,7 @@ class AiSignalBuilderService {
           .clamp(0.0, 1.0)
           .toDouble(),
       weight: _sourceWeightForIntent(source, intent),
+      categoryScores: _filteredCategoryScores(weightedScores),
       tags: tags,
       reasons: [
         source == AiSignalSource.sceneChange
@@ -893,6 +901,7 @@ class AiSignalBuilderService {
           .clamp(0.0, 1.0)
           .toDouble(),
       weight: _sourceWeightForIntent(AiSignalSource.faceReaction, intent),
+      categoryScores: _filteredCategoryScores(weightedScores),
       tags: _uniqueStrings(tags).take(7).toList(),
       reasons: [
         'On-device face/reaction detector found expressive visual evidence',
@@ -1121,6 +1130,89 @@ class AiSignalBuilderService {
       return MapEntry(key, value.clamp(0.0, 1.0).toDouble());
     });
   }
+
+
+  Map<String, double> _filteredCategoryScores(
+    Map<String, double> scores, {
+    double minimum = 0.04,
+  }) {
+    final result = <String, double>{};
+
+    for (final entry in scores.entries) {
+      final category = _canonicalMood(entry.key);
+      if (!_publicCategories.contains(category)) continue;
+
+      final value = entry.value.clamp(0.0, 1.0).toDouble();
+      if (value < minimum) continue;
+
+      final existing = result[category] ?? 0.0;
+      if (value > existing) result[category] = value;
+    }
+
+    return result;
+  }
+
+  Map<String, double> _singleCategoryScore(String category, double score) {
+    final mood = _canonicalMood(category);
+    if (!_publicCategories.contains(mood)) return const {};
+    return {mood: score.clamp(0.0, 1.0).toDouble()};
+  }
+
+  String _canonicalMood(String mood) {
+    final value = mood.toLowerCase().trim();
+    switch (value) {
+      case 'exciting':
+        return 'music';
+      case 'information':
+      case 'informative':
+      case 'educational':
+        return 'info';
+      case 'joy':
+      case 'joyful':
+      case 'celebration':
+      case 'celebrate':
+        return 'happy';
+      case 'love':
+      case 'romance':
+      case 'couple':
+        return 'romantic';
+      case 'mad':
+      case 'anger':
+      case 'argument':
+        return 'angry';
+      case 'fighting':
+      case 'combat':
+        return 'fight';
+      case 'entertainment':
+      case 'fun':
+      case 'interesting':
+        return 'entertaining';
+      case 'strange':
+      case 'unexpected':
+        return 'weird';
+      default:
+        return value;
+    }
+  }
+
+  Set<String> get _publicCategories => const {
+        'funny',
+        'happy',
+        'sad',
+        'emotional',
+        'romantic',
+        'angry',
+        'action',
+        'fight',
+        'weird',
+        'entertaining',
+        'reaction',
+        'hook',
+        'info',
+        'music',
+        'viral',
+        'highlight',
+      };
 
   double _sourceWeightForIntent(AiSignalSource source, ClipIntent intent) {
     switch (source) {

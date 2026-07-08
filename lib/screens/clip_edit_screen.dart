@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import '../models/ai_suggestion.dart';
 import '../models/selected_video.dart';
+import '../services/ad_service.dart';
 import '../services/clip_export_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/time_formatter.dart';
 import '../widgets/app_loading_indicator.dart';
+import '../widgets/free_banner_ad.dart';
 import 'clip_preview_screen.dart';
 
 class ClipEditScreen extends StatefulWidget {
@@ -202,6 +204,8 @@ class _ClipEditScreenState extends State<ClipEditScreen> {
         ),
       );
 
+      AdService.instance.maybeShowInterstitialAfterExport();
+
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => ClipPreviewScreen(
@@ -246,6 +250,16 @@ class _ClipEditScreenState extends State<ClipEditScreen> {
       ),
       body: SafeArea(
         child: _buildBody(),
+      ),
+      bottomNavigationBar: const SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: AppSpacing.xs),
+          child: FreeBannerAd(
+            placement: 'clip_edit_bottom',
+            showLabel: true,
+          ),
+        ),
       ),
     );
   }

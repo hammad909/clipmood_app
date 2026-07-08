@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import '../models/ai_suggestion.dart';
 import '../models/selected_video.dart';
+import '../services/ad_service.dart';
 import '../services/clip_export_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/time_formatter.dart';
 import '../widgets/ai_suggestion_card.dart';
 import '../widgets/app_loading_indicator.dart';
+import '../widgets/free_banner_ad.dart';
 import 'clip_edit_screen.dart';
 import 'manual_trim_screen.dart';
 import 'saved_clips_screen.dart';
@@ -163,6 +165,8 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Saved "${suggestion.title}" to your library.')),
       );
+
+      AdService.instance.maybeShowInterstitialAfterExport();
     } catch (e) {
       if (!mounted) return;
 
@@ -226,6 +230,10 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
       successCount: successCount,
       failedCount: failedCount,
     );
+
+    if (successCount > 0) {
+      AdService.instance.showInterstitialAfterBatchExport();
+    }
   }
 
   Future<void> _showBatchResultDialog({
@@ -375,6 +383,10 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
                   children: [
                     Expanded(child: _buildVideoPlayer(controller)),
                     _buildProgressRow(controller),
+                    const FreeBannerAd(
+                      placement: 'ai_results_after_preview',
+                      showLabel: true,
+                    ),
                   ],
                 ),
               ),
@@ -391,6 +403,10 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
               child: _buildVideoPlayer(controller),
             ),
             _buildProgressRow(controller),
+            const FreeBannerAd(
+              placement: 'ai_results_after_preview',
+              showLabel: true,
+            ),
             Expanded(child: _buildSuggestionsList()),
           ],
         );
@@ -468,7 +484,7 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
       ),
       children: [
         _buildSelectionToolbar(),
-        const SizedBox(height: AppSpacing.sm),
+        const SizedBox(height: AppSpacing.md),
         ..._buildSuggestionSections(),
       ],
     );
@@ -592,12 +608,13 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
         ),
       );
 
-      widgets.addAll(
-        suggestions.map((suggestion) {
-          final key = _keyFor(suggestion);
-          final isPreviewing = _previewingKey == key;
+      for (var index = 0; index < suggestions.length; index++) {
+        final suggestion = suggestions[index];
+        final key = _keyFor(suggestion);
+        final isPreviewing = _previewingKey == key;
 
-          return Padding(
+        widgets.add(
+          Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.md),
             child: Stack(
               children: [
@@ -647,9 +664,9 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
                   ),
               ],
             ),
-          );
-        }),
-      );
+          ),
+        );
+      }
     }
 
     return widgets;

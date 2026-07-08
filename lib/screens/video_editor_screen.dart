@@ -12,6 +12,7 @@ import '../theme/app_theme.dart';
 import '../utils/time_formatter.dart';
 import '../widgets/ai_scan_progress_panel.dart';
 import '../widgets/app_loading_indicator.dart';
+import '../widgets/free_banner_ad.dart';
 import 'ai_clips_result_screen.dart';
 import 'saved_clips_screen.dart';
 
@@ -35,7 +36,7 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
   bool _isInitialized = false;
   bool _hasError = false;
   bool _isScanning = false;
-  AiScanMode _selectedScanMode = AiScanMode.balanced;
+  AiScanMode _selectedScanMode = AiScanMode.accurate;
   AiScanProgress _scanProgress = const AiScanProgress.idle();
   AiScanCancellationToken? _scanCancellationToken;
 
@@ -387,6 +388,11 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
             ),
           ],
         ],
+        const SizedBox(height: AppSpacing.xl),
+        const FreeBannerAd(
+          placement: 'video_editor_scan_bottom',
+          showLabel: true,
+        ),
       ],
     );
   }

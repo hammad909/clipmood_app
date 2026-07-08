@@ -1,16 +1,17 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-
 import 'models/selected_video.dart';
 import 'screens/manual_trim_screen.dart';
 import 'screens/premium_coming_soon_screen.dart';
 import 'screens/saved_clips_screen.dart';
 import 'screens/video_editor_screen.dart';
+import 'services/ad_service.dart';
 import 'services/video_picker_service.dart';
+import 'widgets/free_banner_ad.dart';
 import 'theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AdService.instance.initialize();
   runApp(const ClipMoodApp());
 }
 
@@ -43,36 +44,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool get _isPickingVideo => _isPickingAiVideo || _isPickingManualVideo;
 
-  late Future<int> _savedClipsCountFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _savedClipsCountFuture = _loadSavedClipsCount();
-  }
-
-  Future<int> _loadSavedClipsCount() async {
-    try {
-      final docsDir = await getApplicationDocumentsDirectory();
-      final clipsDir = Directory('${docsDir.path}/clips');
-
-      if (!await clipsDir.exists()) return 0;
-
-      return clipsDir
-          .listSync()
-          .whereType<File>()
-          .where((file) => file.path.toLowerCase().endsWith('.mp4'))
-          .length;
-    } catch (_) {
-      return 0;
-    }
-  }
-
   void _refreshSavedClipsCount() {
     if (!mounted) return;
-    setState(() {
-      _savedClipsCountFuture = _loadSavedClipsCount();
-    });
+    setState(() {});
   }
 
   Future<SelectedVideo?> _pickAndValidateFreePlanVideo() async {
@@ -242,99 +216,105 @@ class _HomeScreenState extends State<HomeScreen> {
         centerTitle: false,
         title: const Text('ClipMood Studio'),
         actions: [
-          IconButton(
-            tooltip: 'Saved Clips',
-            onPressed: _openSavedClips,
-            icon: const Icon(Icons.video_library_outlined),
-          ),
+          // Premium badge/icon — kept separate from Saved Clips icon, does not replace it.
+          _PremiumAppBarAction(onTap: _openPremiumScreen),
           const SizedBox(width: AppSpacing.xs),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: 0,
-        onDestinationSelected: _onBottomNavSelected,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Studio',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.video_library_outlined),
-            selectedIcon: Icon(Icons.video_library),
-            label: 'Saved',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.workspace_premium_outlined),
-            selectedIcon: Icon(Icons.workspace_premium),
-            label: 'Premium',
-          ),
-        ],
-      ),
+      bottomNavigationBar: _buildBottomArea(),
       body: SafeArea(
+        bottom: false,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxHeight < 640;
             final logoSize = compact ? 64.0 : 82.0;
             final verticalGap = compact ? AppSpacing.md : AppSpacing.lg;
 
-            return Padding(
-              padding: EdgeInsets.fromLTRB(
-                AppSpacing.xl,
-                compact ? AppSpacing.md : AppSpacing.lg,
-                AppSpacing.xl,
-                AppSpacing.lg,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildPlanSelector(compact: compact),
-                  SizedBox(height: verticalGap),
-                  Expanded(
-                    child: Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.center,
-                        child: SizedBox(
-                          width: constraints.maxWidth - (AppSpacing.xl * 2),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              _buildBrandMark(size: logoSize),
-                              SizedBox(height: compact ? AppSpacing.md : AppSpacing.lg),
-                              Text(
-                                'Find clips worth sharing',
-                                textAlign: TextAlign.center,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall
-                                    ?.copyWith(fontSize: compact ? 24 : 28),
-                              ),
-                              const SizedBox(height: AppSpacing.sm),
-                              const Text(
-                                'Use AI for fast clip discovery, or manually cut the exact moment you want.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: AppColors.textSecondary,
-                                  height: 1.35,
+            // Fix for rotation / small-viewport pixel overflow:
+            // Wrapping the content in a scroll view with a min-height
+            // constraint lets the layout still center itself on tall
+            // screens (via Expanded) while gracefully scrolling instead
+            // of throwing "RenderFlex overflowed by N pixels" whenever
+            // the device rotates to landscape or the keyboard/system UI
+            // shrinks the available height.
+            return LayoutBuilder(
+              builder: (context, _) {
+                return SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  padding: EdgeInsets.fromLTRB(
+                    AppSpacing.xl,
+                    compact ? AppSpacing.md : AppSpacing.lg,
+                    AppSpacing.xl,
+                    AppSpacing.lg,
+                  ),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight -
+                          (compact ? AppSpacing.md : AppSpacing.lg) -
+                          AppSpacing.lg,
+                    ),
+                    child: IntrinsicHeight(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(height: verticalGap),
+                          Expanded(
+                            child: Center(
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.center,
+                                child: SizedBox(
+                                  width: constraints.maxWidth -
+                                      (AppSpacing.xl * 2),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      _buildBrandMark(size: logoSize),
+                                      SizedBox(
+                                        height: compact
+                                            ? AppSpacing.md
+                                            : AppSpacing.lg,
+                                      ),
+                                      Text(
+                                        'Find clips worth sharing',
+                                        textAlign: TextAlign.center,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .headlineSmall
+                                            ?.copyWith(
+                                              fontSize: compact ? 24 : 28,
+                                            ),
+                                      ),
+                                      const SizedBox(height: AppSpacing.sm),
+                                      const Text(
+                                        'Use AI for fast clip discovery, or manually cut the exact moment you want.',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: AppColors.textSecondary,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                      if (!compact) ...[
+                                        const SizedBox(height: AppSpacing.xl),
+                                        _buildFeatureRow(),
+                                      ],
+                                    ],
+                                  ),
                                 ),
                               ),
-                              if (!compact) ...[
-                                const SizedBox(height: AppSpacing.xl),
-                                _buildFeatureRow(),
-                              ],
-                            ],
+                            ),
                           ),
-                        ),
+                          SizedBox(height: verticalGap),
+                          _buildPrimaryActions(),
+                        ],
                       ),
                     ),
                   ),
-                  SizedBox(height: verticalGap),
-                  _buildPrimaryActions(),
-                ],
-              ),
+                );
+              },
             );
           },
         ),
@@ -342,33 +322,55 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildPlanSelector({required bool compact}) {
-    return Row(
-      children: [
-        Expanded(
-          child: _PlanMiniCard(
-            title: 'Free',
-            price: r'$0',
-            subtitle: compact ? 'Available now' : 'AI clips + manual trim',
-            icon: Icons.auto_awesome,
-            selected: true,
-            onTap: null,
+  /// Keeps ads outside the main creative/action area.
+  /// This feels cleaner than placing a banner between the title and buttons,
+  /// and it prevents the ad from breaking the fixed home layout on small phones.
+  Widget _buildBottomArea() {
+    return SafeArea(
+      top: false,
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          border: Border(
+            top: BorderSide(color: AppColors.border, width: 0.8),
           ),
         ),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(
-          child: _PlanMiniCard(
-            title: 'Premium',
-            price: r'$49',
-            subtitle: compact ? 'Coming soon' : 'Links + stronger AI',
-            icon: Icons.workspace_premium,
-            selected: false,
-            onTap: _openPremiumScreen,
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 6, bottom: 4),
+              child: FreeBannerAd(
+                placement: 'home_above_navigation',
+                showLabel: true,
+              ),
+            ),
+            NavigationBar(
+              selectedIndex: 0,
+              onDestinationSelected: _onBottomNavSelected,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.home_outlined),
+                  selectedIcon: Icon(Icons.home),
+                  label: 'Studio',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.video_library_outlined),
+                  selectedIcon: Icon(Icons.video_library),
+                  label: 'Saved',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.workspace_premium_outlined),
+                  selectedIcon: Icon(Icons.workspace_premium),
+                  label: 'Premium',
+                ),
+              ],
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
+
 
   Widget _buildBrandMark({required double size}) {
     return Center(
@@ -383,6 +385,9 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Image.asset(
           'assets/icon/clipmood_icon.png',
           fit: BoxFit.cover,
+          // filterQuality avoids the blocky/aliased "pixel" look when the
+          // icon asset is scaled up or down for different logoSize values.
+          filterQuality: FilterQuality.high,
           errorBuilder: (context, error, stackTrace) {
             return Container(
               decoration: BoxDecoration(
@@ -476,6 +481,59 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+/// Small "Premium · Free" indicator placed in the AppBar, to the left of the
+/// existing Saved Clips icon (which is left untouched). Uses a Stack so the
+/// badge text never forces extra layout height/width that could clip or
+/// overflow on narrow screens.
+class _PremiumAppBarAction extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _PremiumAppBarAction({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 2),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.workspace_premium_outlined,
+                color: AppColors.secondary,
+                size: 22,
+              ),
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.cardBackgroundSubtle,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: const Text(
+                  'FREE',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textSecondary,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ignore: unused_element
 class _PlanMiniCard extends StatelessWidget {
   final String title;
   final String price;

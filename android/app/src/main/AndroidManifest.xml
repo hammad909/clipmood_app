@@ -5,9 +5,14 @@
            <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
 
     <application
-        android:label="clipmood_app"
+        android:label="clipmood"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+
+        <meta-data
+              android:name="com.google.android.gms.ads.APPLICATION_ID"
+              android:value="ca-app-pub-4216236017253903~3540891389"/>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

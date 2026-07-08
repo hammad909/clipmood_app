@@ -1,5 +1,4 @@
 import 'dart:math';
-
 import '../models/ai_signal.dart';
 import '../models/ai_suggestion.dart';
 import '../models/clip_candidate.dart';
@@ -80,35 +79,92 @@ class MultiSignalClipScorer {
     final candidates = <ClipCandidate>[];
 
     for (final signal in signals.where((signal) => signal.isUsable)) {
-      final mood = _canonicalMood(signal.mood);
-      if (!_isPublicCategory(mood)) continue;
+      final categoryScores = _candidateCategoryScoresForSignal(signal);
+      if (categoryScores.isEmpty) continue;
 
-      final minClipLength = _clipLengthForMood(mood, durationSeconds: durationSeconds);
-      final padding = _paddingForMood(mood, source: signal.source);
-      final range = _rangeAroundSignal(
-        signal,
-        durationSeconds: durationSeconds,
-        minClipLength: minClipLength,
-        preRollSeconds: padding.preRollSeconds,
-        postRollSeconds: padding.postRollSeconds,
-      );
+      for (final entry in categoryScores.entries) {
+        final mood = _canonicalMood(entry.key);
+        if (!_isPublicCategory(mood)) continue;
 
-      candidates.add(
-        ClipCandidate(
-          startSeconds: range.start,
-          endSeconds: range.end,
-          title: _titleForMood(mood),
-          mood: mood,
-          score: signal.weightedScore.abs(),
-          confidence: _candidateConfidence(signal),
-          signals: [signal],
-          reasons: _candidateReasonsFromSignal(signal, mood),
-        ),
-      );
+        final categoryStrength = entry.value.clamp(0.0, 1.0).toDouble();
+        if (categoryStrength < _minSignalCategoryScore(mood)) continue;
+
+        final minClipLength = _clipLengthForMood(mood, durationSeconds: durationSeconds);
+        final padding = _paddingForMood(mood, source: signal.source);
+        final range = _rangeAroundSignal(
+          signal,
+          durationSeconds: durationSeconds,
+          minClipLength: minClipLength,
+          preRollSeconds: padding.preRollSeconds,
+          postRollSeconds: padding.postRollSeconds,
+        );
+
+        candidates.add(
+          ClipCandidate(
+            startSeconds: range.start,
+            endSeconds: range.end,
+            title: _titleForMood(mood),
+            mood: mood,
+            score: (categoryStrength * signal.normalizedConfidence * signal.weight)
+                .clamp(0.0, 1.0)
+                .toDouble(),
+            confidence: _candidateConfidence(signal),
+            categoryScores: _publicSignalCategoryScores(signal),
+            signals: [signal],
+            reasons: _candidateReasonsFromSignal(signal, mood),
+          ),
+        );
+      }
     }
 
     candidates.sort((a, b) => a.startSeconds.compareTo(b.startSeconds));
     return candidates;
+  }
+
+  Map<String, double> _candidateCategoryScoresForSignal(AiSignal signal) {
+    final all = _publicSignalCategoryScores(signal);
+    if (all.isEmpty) return const {};
+
+    final sorted = all.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    // Keep the top few categories per signal. This is the key upgrade:
+    // one signal can create funny + happy + entertaining candidates, and the
+    // final scorer decides which category actually wins for that moment.
+    return Map<String, double>.fromEntries(sorted.take(4));
+  }
+
+  Map<String, double> _publicSignalCategoryScores(AiSignal signal) {
+    final result = <String, double>{};
+
+    for (final entry in signal.normalizedCategoryScores.entries) {
+      final mood = _canonicalMood(entry.key);
+      if (!_isPublicCategory(mood)) continue;
+      final value = entry.value.clamp(0.0, 1.0).toDouble();
+      if (value <= 0) continue;
+      result[mood] = max(result[mood] ?? 0.0, value).toDouble();
+    }
+
+    return result;
+  }
+
+  double _minSignalCategoryScore(String mood) {
+    switch (_canonicalMood(mood)) {
+      case 'funny':
+      case 'happy':
+      case 'sad':
+      case 'emotional':
+      case 'romantic':
+      case 'angry':
+      case 'fight':
+      case 'weird':
+        return 0.16;
+      case 'hook':
+      case 'info':
+        return 0.15;
+      default:
+        return 0.12;
+    }
   }
 
   ClipCandidate _scoreCandidate(
@@ -118,14 +174,21 @@ class MultiSignalClipScorer {
     final positiveSignals = candidate.signals.where((signal) => !signal.isNegative).toList();
     final negativeSignals = candidate.signals.where((signal) => signal.isNegative).toList();
 
-    final signalScore = positiveSignals.isEmpty
-        ? 0.0
-        : positiveSignals.fold<double>(0.0, (sum, signal) => sum + signal.weightedScore.abs()) /
-            positiveSignals.length;
+    final categorySignalValues = positiveSignals
+        .map((signal) =>
+            signal.categoryScoreFor(candidate.mood) * signal.normalizedConfidence * signal.weight)
+        .where((value) => value > 0)
+        .map((value) => value.clamp(0.0, 1.0).toDouble())
+        .toList();
 
-    final bestSignalScore = positiveSignals.isEmpty
+    final signalScore = categorySignalValues.isEmpty
         ? 0.0
-        : positiveSignals.map((signal) => signal.weightedScore.abs()).reduce(max);
+        : categorySignalValues.fold<double>(0.0, (sum, value) => sum + value) /
+            categorySignalValues.length;
+
+    final bestSignalScore = categorySignalValues.isEmpty
+        ? 0.0
+        : categorySignalValues.reduce(max);
 
     final sourceDiversityBonus = _sourceDiversityBonus(candidate);
     final categoryEvidenceBonus = _categoryEvidenceBonus(candidate);
@@ -156,11 +219,23 @@ class MultiSignalClipScorer {
         .toDouble();
 
     final categoryPrecision = _categoryPrecisionScore(candidate, candidate.mood);
+    final categoryScores = _buildPromptCategoryScores(
+      candidate,
+      finalScore: finalScore,
+      confidence: confidence,
+      categoryPrecision: categoryPrecision,
+    );
+    final logicJustifications = _buildTopLogicJustifications(
+      candidate,
+      categoryScores,
+    );
 
     return candidate.copyWith(
       score: finalScore,
       confidence: confidence,
       categoryPrecision: categoryPrecision,
+      categoryScores: categoryScores,
+      logicJustifications: logicJustifications,
       title: _titleForMood(candidate.mood),
       reasons: _rankedPublicReasons(candidate, finalScore: finalScore),
     );
@@ -180,6 +255,16 @@ class MultiSignalClipScorer {
 
     final minScore = _minScoreForMood(mood);
     if (candidate.score < minScore) return false;
+
+    // Prompt rule: categories below 0.4 are filtered out. If this candidate
+    // has no category that reaches 0.4, it is not interesting enough to show.
+    if (candidate.categoryScores.isEmpty) return false;
+
+    // New precision rule: because every moment is scored against all categories,
+    // the chosen mood must actually be the best fitting category with a clear
+    // enough gap over the next category. This prevents action clips being shown
+    // as fight, happy clips being shown as funny, etc.
+    if (!_chosenCategoryWins(candidate, mood)) return false;
 
     // Avoid accepting very low-confidence clips, even when one weak tag matched.
     if (candidate.confidence < _minConfidenceForMood(mood)) return false;
@@ -253,7 +338,7 @@ class MultiSignalClipScorer {
     required int durationSeconds,
   }) {
     final selected = <ClipCandidate>[];
-    final sectionOrder = _sectionOrder;
+    final perMoodCount = <String, int>{};
     final maxPerSection = _maxPerSectionForTarget(targetCount);
 
     bool duplicateOfSelected(ClipCandidate candidate) {
@@ -264,31 +349,22 @@ class MultiSignalClipScorer {
       });
     }
 
-    // First pass: guarantee variety across sections where real evidence exists.
-    for (final mood in sectionOrder) {
-      final sectionCandidates = ranked
-          .where((candidate) => candidate.mood == mood)
-          .where((candidate) => !duplicateOfSelected(candidate))
-          .take(maxPerSection)
-          .toList();
-      selected.addAll(sectionCandidates);
-      if (selected.length >= targetCount) break;
-    }
-
-    // Second pass: fill the rest with the best remaining moments, still no duplicates.
+    // Rank-first selection: when the same moment can be funny/happy/entertaining,
+    // only the highest-scoring category survives. This is more precise than
+    // filling categories in a fixed section order.
     for (final candidate in ranked) {
       if (selected.length >= targetCount) break;
-      if (selected.contains(candidate)) continue;
       if (duplicateOfSelected(candidate)) continue;
+
+      final mood = _canonicalMood(candidate.mood);
+      final usedForMood = perMoodCount[mood] ?? 0;
+      if (usedForMood >= maxPerSection) continue;
+
       selected.add(candidate);
+      perMoodCount[mood] = usedForMood + 1;
     }
 
-    selected.sort((a, b) {
-      final sectionCompare = _sectionRank(a.mood).compareTo(_sectionRank(b.mood));
-      if (sectionCompare != 0) return sectionCompare;
-      return b.score.compareTo(a.score);
-    });
-
+    selected.sort((a, b) => a.startSeconds.compareTo(b.startSeconds));
     return selected.take(targetCount).toList();
   }
 
@@ -402,65 +478,54 @@ class MultiSignalClipScorer {
     final sources = candidate.sources;
     final tags = _allTags(candidate);
 
+    bool hasTag(List<String> needles) {
+      return tags.any((tag) => needles.any((needle) => tag.contains(needle)));
+    }
+
     switch (mood) {
       case 'funny':
-        return (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('laughter'))) ||
-            (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('smile'))) ||
-            (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('comedy')));
+        return hasTag(['laughter', 'smile', 'comedy']);
       case 'happy':
-        return (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('happy face') || tag.contains('smile'))) ||
-            (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('happy') || tag.contains('celebration') || tag.contains('crowd'))) ||
-            (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('happy wording')));
+        return hasTag(['happy face', 'happy wording', 'smile', 'celebration', 'crowd', 'hype']);
       case 'romantic':
-        return (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('romantic'))) ||
-            (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('romantic') || tag.contains('tender')));
+        return hasTag(['romantic', 'tender', 'love', 'wedding']);
       case 'angry':
-        return (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('angry'))) ||
-            (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('angry') || tag.contains('argument'))) ||
-            (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('angry') || tag.contains('serious')));
+        return hasTag(['angry', 'argument', 'serious']) ||
+            (sources.contains(AiSignalSource.audioEvent) && hasTag(['shout', 'yell']));
       case 'sad':
-        return sources.contains(AiSignalSource.transcript) ||
-            (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('sad') || tag.contains('cry'))) ||
-            sources.contains(AiSignalSource.faceReaction);
+        return hasTag(['sad', 'cry', 'sobbing', 'loss', 'pain']);
       case 'emotional':
-        return sources.contains(AiSignalSource.transcript) ||
-            sources.contains(AiSignalSource.faceReaction) ||
-            sources.contains(AiSignalSource.audioEvent);
+        return hasTag(['emotional', 'heartfelt', 'tender', 'proud', 'family', 'gratitude']) ||
+            (sources.contains(AiSignalSource.transcript) && candidate.sourceDiversity >= 2);
       case 'action':
         return sources.contains(AiSignalSource.visualMotion) ||
             sources.contains(AiSignalSource.sceneChange) ||
             sources.contains(AiSignalSource.audioPeak) ||
-            (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('action') || tag.contains('crowd')));
+            (sources.contains(AiSignalSource.audioEvent) && hasTag(['action', 'impact', 'crowd']));
       case 'fight':
-        return sources.contains(AiSignalSource.visualMotion) ||
+        final hasFightAnchor = hasTag(['fight', 'impact', 'punch', 'hit', 'slap', 'attack', 'argument']);
+        final hasPhysicalSupport = sources.contains(AiSignalSource.visualMotion) ||
             sources.contains(AiSignalSource.sceneChange) ||
             sources.contains(AiSignalSource.audioPeak) ||
-            (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('fight') || tag.contains('impact') || tag.contains('action'))) ||
-            (sources.contains(AiSignalSource.transcript) && tags.any((tag) => tag.contains('fight')));
+            sources.contains(AiSignalSource.audioEvent);
+        return hasFightAnchor && hasPhysicalSupport;
       case 'entertaining':
-        return (sources.contains(AiSignalSource.audioEvent) && tags.any((tag) => tag.contains('entertaining') || tag.contains('laughter') || tag.contains('crowd') || tag.contains('hype'))) ||
-            (sources.contains(AiSignalSource.faceReaction) && tags.any((tag) => tag.contains('entertaining') || tag.contains('smile') || tag.contains('reaction'))) ||
-            candidate.sourceDiversity >= 2;
+        return hasTag(['entertaining', 'laughter', 'crowd', 'hype', 'smile', 'music', 'reaction']) ||
+            (candidate.sourceDiversity >= 2 && candidate.signalStrength >= 0.26);
       case 'reaction':
-        return sources.contains(AiSignalSource.faceReaction) ||
-            sources.contains(AiSignalSource.audioEvent) ||
-            sources.contains(AiSignalSource.visualMotion) ||
-            sources.contains(AiSignalSource.sceneChange);
+        return sources.contains(AiSignalSource.faceReaction) || hasTag(['reaction', 'face', 'head movement', 'eye expression']);
       case 'hook':
       case 'info':
         return sources.contains(AiSignalSource.transcript);
       case 'music':
-        return sources.contains(AiSignalSource.audioEvent) || sources.contains(AiSignalSource.audioPeak);
+        return hasTag(['music', 'beat', 'song']) || sources.contains(AiSignalSource.audioPeak);
       case 'viral':
-        return sources.contains(AiSignalSource.audioEvent) ||
-            sources.contains(AiSignalSource.audioPeak) ||
-            sources.contains(AiSignalSource.faceReaction);
+        return hasTag(['crowd', 'hype', 'strong delivery']) ||
+            (candidate.sourceDiversity >= 2 && candidate.signalStrength >= 0.30);
       case 'weird':
-        return sources.contains(AiSignalSource.transcript) ||
-            sources.contains(AiSignalSource.audioEvent) ||
-            sources.contains(AiSignalSource.faceReaction);
+        return hasTag(['weird', 'unexpected', 'strange']);
       case 'highlight':
-        return candidate.sourceDiversity >= 2 || candidate.signalStrength >= 0.28;
+        return candidate.sourceDiversity >= 2 || candidate.signalStrength >= 0.35;
       default:
         return false;
     }
@@ -619,6 +684,256 @@ class MultiSignalClipScorer {
       default:
         return false;
     }
+  }
+
+
+  bool _chosenCategoryWins(ClipCandidate candidate, String mood) {
+    final canonicalMood = _canonicalMood(mood);
+    final categoryScore = candidate.categoryScoreFor(canonicalMood);
+    if (categoryScore < _minTopCategoryScoreForMood(canonicalMood)) return false;
+
+    final sorted = candidate.categoryScores.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    if (sorted.isEmpty) return false;
+
+    final top = sorted.first;
+    if (top.key != canonicalMood && top.value > categoryScore + 0.02) {
+      return false;
+    }
+
+    final second = candidate.secondCategoryScoreFor(canonicalMood);
+    final gap = categoryScore - second;
+    final requiredGap = _minDominanceGapForMood(canonicalMood);
+
+    // Very strong anchor categories can still pass with a slightly smaller gap.
+    if (categoryScore >= 0.82 && _hasStrongCategoryAnchor(candidate, canonicalMood)) {
+      return gap >= requiredGap * 0.55;
+    }
+
+    return gap >= requiredGap || candidate.categoryScores.length == 1;
+  }
+
+  double _minTopCategoryScoreForMood(String mood) {
+    switch (_canonicalMood(mood)) {
+      case 'funny':
+      case 'happy':
+      case 'sad':
+      case 'emotional':
+      case 'romantic':
+      case 'angry':
+      case 'fight':
+      case 'weird':
+        return 0.48;
+      case 'action':
+      case 'entertaining':
+      case 'reaction':
+        return 0.44;
+      default:
+        return 0.40;
+    }
+  }
+
+  double _minDominanceGapForMood(String mood) {
+    switch (_canonicalMood(mood)) {
+      case 'funny':
+      case 'happy':
+      case 'sad':
+      case 'emotional':
+      case 'romantic':
+      case 'angry':
+      case 'fight':
+      case 'weird':
+        return 0.10;
+      case 'action':
+      case 'entertaining':
+      case 'reaction':
+      case 'viral':
+        return 0.07;
+      default:
+        return 0.06;
+    }
+  }
+
+  Map<String, double> _buildPromptCategoryScores(
+    ClipCandidate candidate, {
+    required double finalScore,
+    required double confidence,
+    required double categoryPrecision,
+  }) {
+    final result = <String, double>{};
+    final tags = _allTags(candidate);
+    final positiveSignals = candidate.signals.where((signal) => !signal.isNegative).toList();
+
+    for (final category in _promptCategories) {
+      final categorySignalScores = positiveSignals
+          .map((signal) =>
+              signal.categoryScoreFor(category) * signal.normalizedConfidence * signal.weight)
+          .where((score) => score > 0)
+          .map((score) => score.clamp(0.0, 1.0).toDouble())
+          .toList();
+
+      final strongestCategorySignal = categorySignalScores.isEmpty
+          ? 0.0
+          : categorySignalScores.reduce(max).clamp(0.0, 1.0).toDouble();
+
+      final averageCategorySignal = categorySignalScores.isEmpty
+          ? 0.0
+          : (categorySignalScores.fold<double>(0.0, (sum, value) => sum + value) /
+                  categorySignalScores.length)
+              .clamp(0.0, 1.0)
+              .toDouble();
+
+      double score = 0.0;
+
+      // Direct category evidence from the actual signal mood.
+      score += strongestCategorySignal * 0.46;
+      score += averageCategorySignal * 0.20;
+
+      // Strong category anchors are evidence like laughter for funny, crying for sad,
+      // fight/impact tags for fight, romantic words for romantic, etc.
+      if (_tagsSupportPromptCategory(tags, category)) score += 0.20;
+      if (_hasRequiredEvidence(candidate, category)) score += 0.10;
+
+      // If this candidate's main mood is this category, use the final scorer's
+      // confidence and precision to lift the matching category.
+      if (_canonicalMood(candidate.mood) == category) {
+        score += finalScore * 0.16;
+        score += categoryPrecision * 0.16;
+        score += confidence * 0.08;
+      } else if (candidate.sourceDiversity >= 2 && strongestCategorySignal >= 0.16) {
+        // Secondary categories can appear, but only when real signals exist.
+        score += 0.07;
+      }
+
+      // A single weak signal should not push a category over the public threshold.
+      if (categorySignalScores.length <= 1 && !_tagsSupportPromptCategory(tags, category)) {
+        score -= 0.08;
+      }
+
+      final normalized = score.clamp(0.0, 1.0).toDouble();
+      if (normalized >= 0.40) {
+        result[category] = _roundScore(normalized);
+      }
+    }
+
+    final sorted = result.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return Map<String, double>.fromEntries(sorted);
+  }
+
+  Map<String, String> _buildTopLogicJustifications(
+    ClipCandidate candidate,
+    Map<String, double> categoryScores,
+  ) {
+    if (categoryScores.isEmpty) return const {};
+
+    final topEntries = categoryScores.entries.take(2);
+    final result = <String, String>{};
+
+    for (final entry in topEntries) {
+      result[entry.key] = _logicJustificationForPromptCategory(candidate, entry.key);
+    }
+
+    return result;
+  }
+
+  String _logicJustificationForPromptCategory(ClipCandidate candidate, String category) {
+    final tags = _allTags(candidate);
+    final sources = candidate.sources;
+    final evidence = <String>[];
+
+    void add(String text) {
+      if (!evidence.contains(text)) evidence.add(text);
+    }
+
+    switch (_canonicalMood(category)) {
+      case 'funny':
+        if (tags.any((tag) => tag.contains('laughter'))) add('laughter audio');
+        if (tags.any((tag) => tag.contains('smile'))) add('smiling face reaction');
+        if (tags.any((tag) => tag.contains('comedy'))) add('comedy wording');
+        break;
+      case 'happy':
+        if (tags.any((tag) => tag.contains('happy') || tag.contains('smile'))) add('positive facial reaction');
+        if (tags.any((tag) => tag.contains('celebration') || tag.contains('crowd') || tag.contains('hype'))) add('celebration or crowd energy');
+        break;
+      case 'sad':
+        if (tags.any((tag) => tag.contains('sad') || tag.contains('cry'))) add('sad or crying evidence');
+        if (sources.contains(AiSignalSource.transcript)) add('sad speech meaning');
+        break;
+      case 'emotional':
+        if (tags.any((tag) => tag.contains('emotional'))) add('heartfelt emotional wording or sound');
+        if (sources.contains(AiSignalSource.faceReaction)) add('face/reaction evidence');
+        break;
+      case 'romantic':
+        if (tags.any((tag) => tag.contains('romantic') || tag.contains('tender'))) add('romantic or tender evidence');
+        if (sources.contains(AiSignalSource.transcript)) add('love/relationship wording');
+        break;
+      case 'angry':
+        if (tags.any((tag) => tag.contains('angry') || tag.contains('argument'))) add('anger, argument, or shouting evidence');
+        if (tags.any((tag) => tag.contains('serious'))) add('serious face reaction');
+        break;
+      case 'action':
+        if (sources.contains(AiSignalSource.visualMotion)) add('strong visual motion');
+        if (sources.contains(AiSignalSource.sceneChange)) add('scene change energy');
+        if (tags.any((tag) => tag.contains('action'))) add('action sound');
+        if (sources.contains(AiSignalSource.audioPeak)) add('audio peak');
+        break;
+      case 'fight':
+        if (tags.any((tag) => tag.contains('fight') || tag.contains('impact'))) add('fight or impact evidence');
+        if (sources.contains(AiSignalSource.visualMotion)) add('physical movement');
+        if (sources.contains(AiSignalSource.audioPeak)) add('impact-like audio peak');
+        break;
+      case 'weird':
+        if (tags.any((tag) => tag.contains('weird') || tag.contains('unexpected') || tag.contains('strange'))) add('weird or unexpected evidence');
+        if (sources.contains(AiSignalSource.faceReaction)) add('reaction face');
+        break;
+      case 'entertaining':
+        if (tags.any((tag) => tag.contains('entertaining') || tag.contains('laughter') || tag.contains('crowd') || tag.contains('hype'))) add('fun/crowd/laughter evidence');
+        if (candidate.sourceDiversity >= 2) add('multiple AI signals agreed');
+        break;
+    }
+
+    if (evidence.isEmpty && candidate.sourceDiversity >= 2) {
+      add('multiple AI signals supported this moment');
+    }
+    if (evidence.isEmpty) {
+      add(_publicReasonForMood(category));
+    }
+
+    return '${evidence.take(3).join(', ')}.';
+  }
+
+  bool _tagsSupportPromptCategory(List<String> tags, String category) {
+    switch (_canonicalMood(category)) {
+      case 'funny':
+        return tags.any((tag) => tag.contains('laughter') || tag.contains('comedy'));
+      case 'happy':
+        return tags.any((tag) => tag.contains('happy') || tag.contains('smile') || tag.contains('celebration') || tag.contains('crowd') || tag.contains('hype'));
+      case 'sad':
+        return tags.any((tag) => tag.contains('sad') || tag.contains('cry'));
+      case 'emotional':
+        return tags.any((tag) => tag.contains('emotional') || tag.contains('tender'));
+      case 'romantic':
+        return tags.any((tag) => tag.contains('romantic') || tag.contains('tender'));
+      case 'angry':
+        return tags.any((tag) => tag.contains('angry') || tag.contains('argument') || tag.contains('serious'));
+      case 'action':
+        return tags.any((tag) => tag.contains('action') || tag.contains('motion') || tag.contains('scene change') || tag.contains('loudness'));
+      case 'fight':
+        return tags.any((tag) => tag.contains('fight') || tag.contains('impact') || tag.contains('punch') || tag.contains('hit'));
+      case 'weird':
+        return tags.any((tag) => tag.contains('weird') || tag.contains('unexpected') || tag.contains('strange'));
+      case 'entertaining':
+        return tags.any((tag) => tag.contains('entertaining') || tag.contains('laughter') || tag.contains('crowd') || tag.contains('hype') || tag.contains('smile'));
+      default:
+        return false;
+    }
+  }
+
+  double _roundScore(double value) {
+    final clamped = value.clamp(0.0, 1.0).toDouble();
+    return double.parse(clamped.toStringAsFixed(2));
   }
 
   double _supportBonus(ClipCandidate candidate) {
@@ -868,7 +1183,7 @@ class MultiSignalClipScorer {
     final reasons = <String>[
       _publicReasonForMood(candidate.mood),
       if (_categoryPrecisionScore(candidate, candidate.mood) >= _minPrecisionForMood(candidate.mood))
-        'The clip category was confirmed by enough matching evidence.',
+        'The clip was checked against all categories and this category matched best.',
       if (candidate.sourceDiversity >= 2) 'Multiple AI signals pointed to this same moment.',
       if (candidate.signals.any((signal) => signal.source == AiSignalSource.transcript))
         'Speech meaning helped identify this clip.',
@@ -1036,16 +1351,17 @@ class MultiSignalClipScorer {
       case 'romantic':
       case 'angry':
       case 'weird':
-        return 0.70;
+        return 0.72;
       case 'hook':
       case 'info':
         return 0.68;
       case 'action':
-      case 'fight':
       case 'entertaining':
       case 'reaction':
       case 'viral':
-        return 0.64;
+        return 0.66;
+      case 'fight':
+        return 0.72;
       case 'music':
         return 0.62;
       case 'highlight':
@@ -1080,6 +1396,19 @@ class MultiSignalClipScorer {
     return 5;
   }
 
+  List<String> get _promptCategories => const [
+        'sad',
+        'happy',
+        'action',
+        'weird',
+        'emotional',
+        'romantic',
+        'angry',
+        'funny',
+        'entertaining',
+        'fight',
+      ];
+
   List<String> get _sectionOrder => const [
         'funny',
         'happy',
@@ -1099,10 +1428,6 @@ class MultiSignalClipScorer {
         'highlight',
       ];
 
-  int _sectionRank(String mood) {
-    final index = _sectionOrder.indexOf(_canonicalMood(mood));
-    return index < 0 ? 999 : index;
-  }
 
   List<String> _allTags(ClipCandidate candidate) {
     return candidate.signals

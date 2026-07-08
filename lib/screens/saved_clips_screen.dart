@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 import '../theme/app_theme.dart';
 import '../utils/time_formatter.dart';
+import '../widgets/free_banner_ad.dart';
 import 'clip_preview_screen.dart';
 
 enum _SortMode { newest, oldest, largest, smallest, nameAz }
@@ -414,6 +415,20 @@ class _SavedClipsScreenState extends State<SavedClipsScreen> {
               0,
             ),
             child: _buildToolsRow(),
+          ),
+        ),
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.md,
+              AppSpacing.lg,
+              0,
+            ),
+            child: FreeBannerAd(
+              placement: 'saved_clips_top',
+              showLabel: true,
+            ),
           ),
         ),
         if (visible.isEmpty)

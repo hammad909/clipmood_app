@@ -3,10 +3,14 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import '../models/selected_video.dart';
+import '../services/ad_service.dart';
 import '../services/clip_export_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/time_formatter.dart';
+import '../widgets/free_banner_ad.dart';
 import 'saved_clips_screen.dart';
+
+enum _TrimMode { manual, autoSplit }
 
 class ManualTrimScreen extends StatefulWidget {
   final SelectedVideo video;
@@ -22,6 +26,9 @@ class ManualTrimScreen extends StatefulWidget {
 
 class _ManualTrimScreenState extends State<ManualTrimScreen> {
   final ClipExportService _exportService = ClipExportService();
+  final TextEditingController _customSecondsController = TextEditingController();
+
+  static const List<int> _autoSplitPresets = [5, 10, 15, 20, 30, 45, 60];
 
   VideoPlayerController? _controller;
   bool _isInitialized = false;
@@ -33,6 +40,11 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
   double _endSeconds = 1;
   double _saveProgress = 0.0;
   int? _previewEndSeconds;
+
+  _TrimMode _trimMode = _TrimMode.manual;
+  int _autoSplitSeconds = 15;
+  int _autoSplitCurrentIndex = 0;
+  int _autoSplitTotal = 0;
 
   @override
   void initState() {
@@ -57,7 +69,6 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
       setState(() {
         _controller = controller;
         _isInitialized = true;
-        _hasError = false;
         _startSeconds = 0;
         _endSeconds = max(1, defaultEnd).toDouble();
       });
@@ -65,14 +76,6 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
       if (!mounted) return;
       setState(() => _hasError = true);
     }
-  }
-
-  Future<void> _retrySetup() async {
-    setState(() {
-      _hasError = false;
-      _isInitialized = false;
-    });
-    await _setupVideo();
   }
 
   void _videoListener() {
@@ -113,6 +116,26 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
     final duration = TimeFormatter.formatDuration(Duration(seconds: _clipDurationSeconds));
     return '$start → $end  •  $duration';
   }
+
+  /// Start/end second pairs that the current auto-split interval produces,
+  /// covering the video from 0 up to its full duration. The final segment
+  /// may be shorter than the chosen interval if it doesn't divide evenly.
+  List<List<int>> get _autoSplitSegments {
+    final duration = _durationSeconds;
+    final interval = _autoSplitSeconds;
+    if (interval <= 0) return const [];
+
+    final segments = <List<int>>[];
+    for (int start = 0; start < duration; start += interval) {
+      final end = min(start + interval, duration);
+      if (end - start >= 1) {
+        segments.add([start, end]);
+      }
+    }
+    return segments;
+  }
+
+  int get _autoSplitClipCount => _autoSplitSegments.length;
 
   Future<void> _previewSelection() async {
     final controller = _controller;
@@ -179,20 +202,93 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
       if (!mounted) return;
 
       await _showSavedDialog();
+      if (mounted) {
+        AdService.instance.maybeShowInterstitialAfterExport();
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save manual clip: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _saveProgress = 0.0;
+        });
+      }
+    }
+  }
+
+  Future<void> _applyCustomSeconds() async {
+    final value = int.tryParse(_customSecondsController.text.trim());
+    if (value == null || value < 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid number of seconds (1 or more).')),
+      );
+      return;
+    }
+
+    setState(() {
+      _autoSplitSeconds = value.clamp(1, _durationSeconds);
+    });
+  }
+
+  Future<void> _createAutoSplitClips() async {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized || _isSaving) return;
+
+    final segments = _autoSplitSegments;
+    if (segments.isEmpty) return;
+
+    await controller.pause();
+
+    setState(() {
+      _isSaving = true;
+      _saveProgress = 0.0;
+      _isPreviewingSelection = false;
+      _previewEndSeconds = null;
+      _autoSplitCurrentIndex = 0;
+      _autoSplitTotal = segments.length;
+    });
+
+    var savedCount = 0;
+
+    try {
+      for (var i = 0; i < segments.length; i++) {
+        if (!mounted) return;
+
+        setState(() => _autoSplitCurrentIndex = i + 1);
+
+        final segment = segments[i];
+        await _exportService.exportClip(
+          videoPath: widget.video.path,
+          title: 'Clip ${i + 1}',
+          startSeconds: segment[0],
+          endSeconds: segment[1],
+          onProgress: (progress) {
+            if (!mounted) return;
+            final overall = (i + progress.clamp(0.0, 1.0)) / segments.length;
+            setState(() => _saveProgress = overall.clamp(0.0, 1.0).toDouble());
+          },
+        );
+
+        savedCount++;
+      }
+
+      if (!mounted) return;
+
+      await _showAutoSplitSavedDialog(savedCount);
+      if (mounted) {
+        AdService.instance.maybeShowInterstitialAfterExport();
+      }
     } catch (e) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: AppRadius.lgRadius),
-          content: Row(
-            children: [
-              const Icon(Icons.error_outline, color: Colors.white, size: 18),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(child: Text('Failed to save manual clip: $e')),
-            ],
-          ),
+          content: Text('Saved $savedCount of ${segments.length} clips before an error: $e'),
         ),
       );
     } finally {
@@ -200,6 +296,8 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
         setState(() {
           _isSaving = false;
           _saveProgress = 0.0;
+          _autoSplitCurrentIndex = 0;
+          _autoSplitTotal = 0;
         });
       }
     }
@@ -212,28 +310,54 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
         return AlertDialog(
           backgroundColor: AppColors.surfaceElevated,
           shape: RoundedRectangleBorder(borderRadius: AppRadius.lgRadius),
-          title: Row(
+          title: const Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(AppSpacing.xs),
-                decoration: BoxDecoration(
-                  color: AppColors.success.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.check_circle, color: AppColors.success),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              const Expanded(
-                child: Text(
-                  'Manual Clip Saved',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
+              Icon(Icons.check_circle, color: AppColors.success),
+              SizedBox(width: AppSpacing.sm),
+              Text('Manual Clip Saved'),
             ],
           ),
           content: Text(
             'Saved ${TimeFormatter.formatDuration(Duration(seconds: _clipDurationSeconds))} clip to your library.',
-            style: const TextStyle(color: AppColors.textSecondary, height: 1.35),
+            style: const TextStyle(color: AppColors.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Done'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SavedClipsScreen()),
+                );
+              },
+              child: const Text('View Saved Clips'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showAutoSplitSavedDialog(int count) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: AppColors.surfaceElevated,
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.lgRadius),
+          title: const Row(
+            children: [
+              Icon(Icons.check_circle, color: AppColors.success),
+              SizedBox(width: AppSpacing.sm),
+              Text('Clips Saved'),
+            ],
+          ),
+          content: Text(
+            'Saved $count ${count == 1 ? 'clip' : 'clips'} (every $_autoSplitSeconds seconds) to your library.',
+            style: const TextStyle(color: AppColors.textSecondary),
           ),
           actions: [
             TextButton(
@@ -259,6 +383,7 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
   void dispose() {
     _controller?.removeListener(_videoListener);
     _controller?.dispose();
+    _customSecondsController.dispose();
     super.dispose();
   }
 
@@ -284,13 +409,18 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
 
   Widget _buildBody() {
     if (_hasError) {
-      return _buildErrorState();
+      return const Center(
+        child: Text(
+          'Could not load this video.',
+          style: TextStyle(color: AppColors.error),
+        ),
+      );
     }
 
     final controller = _controller;
 
     if (!_isInitialized || controller == null) {
-      return _buildLoadingState();
+      return const Center(child: CircularProgressIndicator());
     }
 
     return OrientationBuilder(
@@ -306,6 +436,7 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
                   children: [
                     Expanded(child: _buildVideoPlayer(controller)),
                     _buildVideoProgressRow(controller),
+                    const FreeBannerAd(placement: 'manual_trim_after_preview'),
                   ],
                 ),
               ),
@@ -322,88 +453,11 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
               child: _buildVideoPlayer(controller),
             ),
             _buildVideoProgressRow(controller),
+            const FreeBannerAd(placement: 'manual_trim_after_preview'),
             Expanded(child: _buildTrimControls(controller)),
           ],
         );
       },
-    );
-  }
-
-  Widget _buildLoadingState() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              color: AppColors.cardBackgroundSubtle,
-              shape: BoxShape.circle,
-              border: Border.all(color: AppColors.border),
-            ),
-            child: const CircularProgressIndicator(
-              strokeWidth: 2.5,
-              valueColor: AlwaysStoppedAnimation<Color>(AppColors.secondary),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          const Text(
-            'Loading video…',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 15,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          const Text(
-            'This only takes a moment.',
-            style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: AppColors.error.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.error_outline, color: AppColors.error, size: 30),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            const Text(
-              'Could not load this video',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            const Text(
-              'The file may be missing, moved, or in an unsupported format.',
-              style: TextStyle(color: AppColors.textSecondary, height: 1.35),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            OutlinedButton.icon(
-              onPressed: _retrySetup,
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Try Again'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -421,48 +475,27 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
   }
 
   Widget _buildVideoProgressRow(VideoPlayerController controller) {
-    return Container(
-      color: AppColors.surfaceElevated,
+    return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.md,
         vertical: AppSpacing.sm,
       ),
       child: Row(
         children: [
-          SizedBox(
-            width: 44,
-            child: Text(
-              TimeFormatter.formatDuration(controller.value.position),
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
-              ),
-            ),
+          Text(
+            TimeFormatter.formatDuration(controller.value.position),
+            style: const TextStyle(fontSize: 12),
           ),
           Expanded(
             child: VideoProgressIndicator(
               controller,
               allowScrubbing: true,
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-              colors: VideoProgressColors(
-                playedColor: AppColors.secondary,
-                bufferedColor: AppColors.border,
-                backgroundColor: AppColors.border.withValues(alpha: 0.4),
-              ),
             ),
           ),
-          SizedBox(
-            width: 44,
-            child: Text(
-              TimeFormatter.formatDuration(controller.value.duration),
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
-              ),
-            ),
+          Text(
+            TimeFormatter.formatDuration(controller.value.duration),
+            style: const TextStyle(fontSize: 12),
           ),
           const SizedBox(width: AppSpacing.xs),
           IconButton(
@@ -483,8 +516,6 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
               controller.value.isPlaying
                   ? Icons.pause_circle_filled
                   : Icons.play_circle_filled,
-              color: AppColors.secondary,
-              size: 30,
             ),
           ),
         ],
@@ -508,66 +539,33 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
         AppSpacing.lg,
       ),
       children: [
-        _buildInfoCard(),
+        _buildModeToggle(),
         const SizedBox(height: AppSpacing.lg),
-        Container(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          decoration: BoxDecoration(
-            color: AppColors.cardBackground,
-            borderRadius: AppRadius.lgRadius,
-            border: Border.all(color: AppColors.border),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: const [
-                  Icon(Icons.content_cut, size: 18, color: AppColors.secondary),
-                  SizedBox(width: AppSpacing.xs),
-                  Text(
-                    'Select Clip Range',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm,
-                  vertical: AppSpacing.xs,
+        if (_trimMode == _TrimMode.manual) ...[
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: BoxDecoration(
+              color: AppColors.cardBackground,
+              borderRadius: AppRadius.lgRadius,
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Select Clip Range',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
                 ),
-                decoration: BoxDecoration(
-                  color: AppColors.cardBackgroundSubtle,
-                  borderRadius: AppRadius.pillRadius,
-                ),
-                child: Text(
+                const SizedBox(height: AppSpacing.sm),
+                Text(
                   _selectionLabel,
                   style: const TextStyle(
                     color: AppColors.textSecondary,
                     fontWeight: FontWeight.w700,
-                    fontSize: 13,
                   ),
                 ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  activeTrackColor: AppColors.secondary,
-                  inactiveTrackColor: AppColors.border,
-                  thumbColor: AppColors.secondary,
-                  overlayColor: AppColors.secondary.withValues(alpha: 0.15),
-                  rangeThumbShape: const RoundRangeSliderThumbShape(
-                    enabledThumbRadius: 9,
-                  ),
-                ),
-                child: RangeSlider(
+                const SizedBox(height: AppSpacing.md),
+                RangeSlider(
                   min: 0,
                   max: durationSeconds.toDouble(),
                   divisions: divisions,
@@ -597,111 +595,230 @@ class _ManualTrimScreenState extends State<ManualTrimScreen> {
                           });
                         },
                 ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _isSaving ? null : _setStartFromCurrentPosition,
-                      icon: const Icon(Icons.keyboard_double_arrow_left, size: 18),
-                      label: const Text('Set Start'),
+                const SizedBox(height: AppSpacing.sm),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _isSaving ? null : _setStartFromCurrentPosition,
+                        icon: const Icon(Icons.keyboard_double_arrow_left, size: 18),
+                        label: const Text('Set Start'),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _isSaving ? null : _setEndFromCurrentPosition,
-                      icon: const Icon(Icons.keyboard_double_arrow_right, size: 18),
-                      label: const Text('Set End'),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _isSaving ? null : _setEndFromCurrentPosition,
+                        icon: const Icon(Icons.keyboard_double_arrow_right, size: 18),
+                        label: const Text('Set End'),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _isSaving ? null : _previewSelection,
-                icon: Icon(_isPreviewingSelection ? Icons.replay : Icons.play_arrow),
-                label: Text(_isPreviewingSelection ? 'Replay Selection' : 'Preview Selection'),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _isSaving ? null : _saveManualClip,
-                icon: _isSaving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.save_alt, size: 18),
-                label: Text(_isSaving ? 'Saving…' : 'Save Clip'),
-              ),
-            ),
-          ],
-        ),
-        if (_isSaving) ...[
-          const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.lg),
           Row(
             children: [
               Expanded(
-                child: ClipRRect(
-                  borderRadius: AppRadius.pillRadius,
-                  child: LinearProgressIndicator(
-                    value: _saveProgress == 0 ? null : _saveProgress,
-                    minHeight: 8,
-                    backgroundColor: AppColors.border,
-                    valueColor: const AlwaysStoppedAnimation<Color>(AppColors.secondary),
-                  ),
+                child: OutlinedButton.icon(
+                  onPressed: _isSaving ? null : _previewSelection,
+                  icon: Icon(_isPreviewingSelection ? Icons.replay : Icons.play_arrow),
+                  label: Text(_isPreviewingSelection ? 'Replay Selection' : 'Preview Selection'),
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
-              SizedBox(
-                width: 40,
-                child: Text(
-                  '${(_saveProgress * 100).round()}%',
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textSecondary,
-                  ),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _isSaving ? null : _saveManualClip,
+                  icon: _isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.save_alt, size: 18),
+                  label: Text(_isSaving ? 'Saving...' : 'Save Clip'),
                 ),
               ),
             ],
+          ),
+        ] else
+          _buildAutoSplitCard(),
+        if (_isSaving) ...[
+          const SizedBox(height: AppSpacing.md),
+          if (_trimMode == _TrimMode.autoSplit && _autoSplitTotal > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+              child: Text(
+                'Saving clip $_autoSplitCurrentIndex of $_autoSplitTotal...',
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ClipRRect(
+            borderRadius: AppRadius.pillRadius,
+            child: LinearProgressIndicator(
+              value: _saveProgress == 0 ? null : _saveProgress,
+              minHeight: 8,
+            ),
           ),
         ],
       ],
     );
   }
 
-  Widget _buildInfoCard() {
+  Widget _buildModeToggle() {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildModeButton(
+            label: 'Manual Range',
+            icon: Icons.content_cut,
+            selected: _trimMode == _TrimMode.manual,
+            onTap: () => setState(() => _trimMode = _TrimMode.manual),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: _buildModeButton(
+            label: 'Auto Split',
+            icon: Icons.grid_view_rounded,
+            selected: _trimMode == _TrimMode.autoSplit,
+            onTap: () => setState(() => _trimMode = _TrimMode.autoSplit),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildModeButton({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: _isSaving ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.secondary : AppColors.cardBackground,
+          borderRadius: AppRadius.lgRadius,
+          border: Border.all(color: selected ? AppColors.secondary : AppColors.border),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: selected ? Colors.white : AppColors.textSecondary),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                color: selected ? Colors.white : AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAutoSplitCard() {
+    final clipCount = _autoSplitClipCount;
+
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: AppColors.cardBackgroundSubtle,
+        color: AppColors.cardBackground,
         borderRadius: AppRadius.lgRadius,
         border: Border.all(color: AppColors.border),
       ),
-      child: const Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.content_cut, color: AppColors.secondary),
-          SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Text(
-              'Manual trim does not run AI and has no 1–5 minute source-video limit. Pick any range from the video, from a 1-second clip up to the full video, preview it, then save it to your clips library.',
-              style: TextStyle(color: AppColors.textSecondary, height: 1.35),
+          const Text(
+            'Auto-Split by Seconds',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Every $_autoSplitSeconds seconds becomes its own clip, from the start of the video to the end.',
+            style: const TextStyle(color: AppColors.textSecondary, height: 1.35),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: _autoSplitPresets.map((seconds) {
+              final selected = _autoSplitSeconds == seconds;
+              return ChoiceChip(
+                label: Text('${seconds}s'),
+                selected: selected,
+                onSelected: _isSaving
+                    ? null
+                    : (_) => setState(() => _autoSplitSeconds = seconds),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _customSecondsController,
+                  enabled: !_isSaving,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    labelText: 'Custom seconds',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              OutlinedButton(
+                onPressed: _isSaving ? null : _applyCustomSeconds,
+                child: const Text('Apply'),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            clipCount > 0
+                ? 'This will create $clipCount ${clipCount == 1 ? 'clip' : 'clips'} of up to $_autoSplitSeconds seconds each.'
+                : 'Choose an interval to see how many clips will be created.',
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: (_isSaving || clipCount == 0) ? null : _createAutoSplitClips,
+              icon: _isSaving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.auto_awesome_mosaic, size: 18),
+              label: Text(_isSaving ? 'Saving...' : 'Create Clips'),
             ),
           ),
         ],
