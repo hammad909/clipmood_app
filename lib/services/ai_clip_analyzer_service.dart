@@ -1,9 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
-
 import 'package:video_player/video_player.dart';
-
+import 'attention_worthy_clip_scorer.dart';
 import '../models/ai_scan_options.dart';
 import '../models/ai_scan_progress.dart';
 import '../models/ai_signal.dart';
@@ -14,7 +13,6 @@ import '../models/face_reaction_signal.dart';
 import 'ai_scan_cancellation_token.dart';
 import 'ai_signal_builder_service.dart';
 import 'audio_peak_analyzer_service.dart';
-import 'multi_signal_clip_scorer.dart';
 import 'transcript_service.dart';
 import 'whisper_kit_transcription_engine.dart';
 import 'visual_highlight_analyzer_service.dart';
@@ -64,7 +62,7 @@ class AiClipAnalyzerService {
   final VisualHighlightAnalyzerService _visualAnalyzer = VisualHighlightAnalyzerService();
   final FaceReactionAnalyzerService _faceReactionAnalyzer = FaceReactionAnalyzerService();
   final AiSignalBuilderService _signalBuilder = AiSignalBuilderService();
-  final MultiSignalClipScorer _clipScorer = MultiSignalClipScorer();
+  final AttentionWorthyClipScorer _attentionScorer = AttentionWorthyClipScorer();
 
   Future<AiClipAnalyzerResult> analyzeVideo(
     String videoPath, {
@@ -257,8 +255,8 @@ class AiClipAnalyzerService {
       emit(
         AiScanStage.scoring,
         0.90,
-        'Combining AI signals and ranking clips...',
-        detail: 'Audio + transcript + visual + face signals are being merged and de-duplicated.',
+        'Finding attention-worthy clips...',
+         detail: 'AI is ranking moments by hook strength, visual energy, reaction value, audio impact, and share potential.',
       );
 
       final signals = _signalBuilder.buildSignals(
@@ -271,11 +269,10 @@ class AiClipAnalyzerService {
         faceReactionSignals: faceReactionSignals,
       );
 
-      final suggestions = _clipScorer.buildSuggestions(
-        signals: signals,
+      final suggestions = _attentionScorer.buildSuggestions(
+       signals: signals,
         durationSeconds: durationSeconds,
-        intent: intent,
-      );
+         );
 
       final debugEntries = _buildDebugEntries(
         durationSeconds: durationSeconds,

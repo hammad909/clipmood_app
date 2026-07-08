@@ -5,7 +5,6 @@ import 'dart:math';
 /// This keeps the product practical on real phones. Creators can choose quick
 /// previews or slower/high-accuracy scans without changing the AI architecture.
 enum AiScanMode {
-  fast,
   balanced,
   accurate,
 }
@@ -13,8 +12,6 @@ enum AiScanMode {
 extension AiScanModeX on AiScanMode {
   String get label {
     switch (this) {
-      case AiScanMode.fast:
-        return 'Fast';
       case AiScanMode.balanced:
         return 'Balanced';
       case AiScanMode.accurate:
@@ -24,8 +21,6 @@ extension AiScanModeX on AiScanMode {
 
   String get helperText {
     switch (this) {
-      case AiScanMode.fast:
-        return 'Quick scan. Uses audio + light visual signals. Does not run slow Whisper transcription unless a cached transcript already exists.';
       case AiScanMode.balanced:
         return 'Recommended. Uses audio, selected local Whisper chunks, visual signals, and face/reaction signals.';
       case AiScanMode.accurate:
@@ -33,7 +28,6 @@ extension AiScanModeX on AiScanMode {
     }
   }
 
-  bool get isFast => this == AiScanMode.fast;
   bool get isBalanced => this == AiScanMode.balanced;
   bool get isAccurate => this == AiScanMode.accurate;
 }
@@ -70,17 +64,6 @@ class AiScanOptions {
 
   factory AiScanOptions.forMode(AiScanMode mode) {
     switch (mode) {
-      case AiScanMode.fast:
-        return const AiScanOptions(
-          mode: AiScanMode.fast,
-          enableAudioEvents: true,
-          enableAudioPeaks: true,
-          enableTranscription: true,
-          enableVisualSignals: true,
-          enableFaceReaction: false,
-          allowTranscriptionEngineRun: false,
-          maxSpeechTranscriptionTasks: 0,
-        );
       case AiScanMode.balanced:
         return const AiScanOptions(
           mode: AiScanMode.balanced,
@@ -112,11 +95,6 @@ class AiScanOptions {
     }
 
     switch (mode) {
-      case AiScanMode.fast:
-        if (durationSeconds <= 60) return 40;
-        if (durationSeconds <= 180) return 60;
-        if (durationSeconds <= 600) return 80;
-        return 100;
       case AiScanMode.balanced:
         if (durationSeconds <= 60) return 60;
         if (durationSeconds <= 180) return 90;

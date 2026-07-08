@@ -36,7 +36,7 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
   bool _isInitialized = false;
   bool _hasError = false;
   bool _isScanning = false;
-  AiScanMode _selectedScanMode = AiScanMode.accurate;
+  AiScanMode _selectedScanMode = AiScanMode.balanced;
   AiScanProgress _scanProgress = const AiScanProgress.idle();
   AiScanCancellationToken? _scanCancellationToken;
 
@@ -103,7 +103,7 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
         stage: AiScanStage.loadingVideo,
         progress: 0.02,
         message: 'Preparing AI scan...',
-        detail: '${_selectedScanMode.label} mode • Auto categories',
+        detail: '${_selectedScanMode.label} mode • Finding attention-worthy clips',
       );
     });
 
@@ -306,6 +306,10 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
                   ),
                 ),
               ),
+        const FreeBannerAd(
+          placement: 'video_editor_below_preview',
+          showLabel: true,
+        ),
         Padding(
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.md,
@@ -366,6 +370,8 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
           ),
         ),
         const SizedBox(height: AppSpacing.lg),
+        _buildLongVideoNotice(),
+        const SizedBox(height: AppSpacing.lg),
         if (_isScanning) ...[
           AiScanProgressPanel(
             progress: _scanProgress,
@@ -377,7 +383,7 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
           FilledButton.icon(
             onPressed: _scanForAiClips,
             icon: const Icon(Icons.auto_awesome),
-            label: const Text('Scan All Clip Types'),
+            label: const Text('Find Attention-Worthy Clips'),
           ),
           if (_lastSuggestions.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.sm),
@@ -388,12 +394,42 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
             ),
           ],
         ],
-        const SizedBox(height: AppSpacing.xl),
-        const FreeBannerAd(
-          placement: 'video_editor_scan_bottom',
-          showLabel: true,
-        ),
+
       ],
+    );
+  }
+
+  Widget _buildLongVideoNotice() {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5),
+        ),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.info_outline,
+            size: 18,
+            color: AppColors.textSecondary,
+          ),
+          SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              'Longer videos can take some time to scan. Balanced mode is faster, while Accurate mode gives deeper results.',
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -455,8 +491,6 @@ class _VideoEditorScreenState extends State<VideoEditorScreen> {
 
   IconData _iconForScanMode(AiScanMode mode) {
     switch (mode) {
-      case AiScanMode.fast:
-        return Icons.flash_on;
       case AiScanMode.balanced:
         return Icons.balance;
       case AiScanMode.accurate:
