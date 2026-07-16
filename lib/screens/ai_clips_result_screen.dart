@@ -295,15 +295,20 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         centerTitle: false,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('AI Results'),
+            const Text('Eye-Catching Clips'),
             Text(
-              '${widget.suggestions.length} clip section${widget.suggestions.length == 1 ? '' : 's'} found',
+              '${widget.suggestions.length} clip${widget.suggestions.length == 1 ? '' : 's'} ready for review',
               style: const TextStyle(
                 color: AppColors.textMuted,
                 fontSize: 12,
@@ -510,7 +515,7 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
               Expanded(
                 child: Text(
                   _selectedKeys.isEmpty
-                      ? '${suggestions.length} clip${suggestions.length == 1 ? '' : 's'} found'
+                      ? '${suggestions.length} eye-catching clip${suggestions.length == 1 ? '' : 's'} found'
                       : '${_selectedKeys.length} selected',
                   style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
                 ),
@@ -569,38 +574,184 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
     );
   }
 
-  List<Widget> _buildSuggestionSections() {
-    final grouped = <_ClipSection, List<AiSuggestion>>{};
+  double _normalizedConfidence(double confidence) {
+    final normalized = confidence > 1 ? confidence / 100 : confidence;
+    return normalized.clamp(0.0, 1.0).toDouble();
+  }
 
-    for (final suggestion in widget.suggestions) {
-      final section = _ClipSection.fromMood(suggestion.mood);
-      grouped.putIfAbsent(section, () => []).add(suggestion);
+  String _postingRecommendation(double confidence) {
+    final score = _normalizedConfidence(confidence);
+
+    if (score >= 0.65) {
+      return 'Worth Posting';
     }
 
-    final sections = grouped.keys.toList()
-      ..sort((a, b) => a.order.compareTo(b.order));
+    if (score >= 0.50) {
+      return 'Worth Posting After Editing';
+    }
 
-    final widgets = <Widget>[];
+    return 'Review Before Posting';
+  }
 
-    for (final section in sections) {
-      final suggestions = grouped[section]!
-        ..sort((a, b) {
-          final startCompare = a.startSeconds.compareTo(b.startSeconds);
-          if (startCompare != 0) return startCompare;
-          return b.confidence.compareTo(a.confidence);
-        });
+  Color _postingRecommendationColor(double confidence) {
+    final score = _normalizedConfidence(confidence);
 
+    if (score >= 0.65) {
+      return AppColors.success;
+    }
+
+    if (score >= 0.50) {
+      return AppColors.warning;
+    }
+
+    return AppColors.textMuted;
+  }
+
+  IconData _postingRecommendationIcon(double confidence) {
+    final score = _normalizedConfidence(confidence);
+
+    if (score >= 0.65) {
+      return Icons.check_circle_outline;
+    }
+
+    if (score >= 0.50) {
+      return Icons.auto_fix_high;
+    }
+
+    return Icons.visibility_outlined;
+  }
+
+  String _moodDescription(String mood) {
+    switch (mood.trim().toLowerCase()) {
+      case 'funny':
+        return 'a funny and entertaining moment';
+      case 'sad':
+        return 'an emotional or sad moment';
+      case 'emotional':
+        return 'an emotional moment';
+      case 'romantic':
+        return 'a romantic moment';
+      case 'angry':
+        return 'a tense or argumentative moment';
+      case 'action':
+        return 'an action-filled moment';
+      case 'fight':
+        return 'a fight or confrontation';
+      case 'weird':
+      case 'strange':
+        return 'an unexpected or unusual moment';
+      case 'entertaining':
+        return 'an entertaining moment';
+      case 'reaction':
+        return 'a strong reaction';
+      case 'hook':
+        return 'a strong hook or memorable quote';
+      case 'info':
+      case 'informative':
+      case 'information':
+        return 'an informative moment';
+      case 'music':
+        return 'a music-focused or edit-friendly moment';
+      case 'exciting':
+        return 'an exciting, high-energy moment';
+      case 'viral':
+        return 'a high-energy moment with strong posting potential';
+      default:
+        return 'an attention-grabbing highlight';
+    }
+  }
+
+  String _clipExplanation(AiSuggestion suggestion) {
+    final title = suggestion.title.trim();
+    final description = _moodDescription(suggestion.mood);
+
+    if (title.isEmpty) {
+      return 'This clip shows $description from the video.';
+    }
+
+    return 'This clip shows $description: $title';
+  }
+
+  List<Widget> _buildSuggestionSections() {
+    final suggestions = [...widget.suggestions]
+      ..sort((a, b) {
+        final confidenceCompare = b.confidence.compareTo(a.confidence);
+        if (confidenceCompare != 0) return confidenceCompare;
+        return a.startSeconds.compareTo(b.startSeconds);
+      });
+
+    final widgets = <Widget>[
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: AppColors.cardBackgroundSubtle,
+          borderRadius: AppRadius.lgRadius,
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.auto_awesome,
+                  size: 22,
+                  color: AppColors.textSecondary,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    'Eye-Catching Clips (${suggestions.length})',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            const Text(
+              'These clips show the most attention-grabbing moments found '
+              'in your video. Each result explains what the clip shows and '
+              'whether it looks worth posting.',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: AppSpacing.md),
+    ];
+
+    if (suggestions.isEmpty) {
       widgets.add(
-        Padding(
-          padding: const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.sm),
-          child: Row(
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          decoration: BoxDecoration(
+            color: AppColors.cardBackgroundSubtle,
+            borderRadius: AppRadius.lgRadius,
+            border: Border.all(color: AppColors.border),
+          ),
+          child: const Column(
             children: [
-              Icon(section.icon, size: 20, color: AppColors.textSecondary),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  '${section.label} (${suggestions.length})',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              Icon(
+                Icons.search_off,
+                size: 40,
+                color: AppColors.textMuted,
+              ),
+              SizedBox(height: AppSpacing.sm),
+              Text(
+                'No eye-catching clips were found.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ],
@@ -608,65 +759,155 @@ class _AiClipsResultScreenState extends State<AiClipsResultScreen> {
         ),
       );
 
-      for (var index = 0; index < suggestions.length; index++) {
-        final suggestion = suggestions[index];
-        final key = _keyFor(suggestion);
-        final isPreviewing = _previewingKey == key;
+      return widgets;
+    }
 
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.md),
-            child: Stack(
-              children: [
-                AiSuggestionCard(
-                  suggestion: suggestion,
-                  selected: _selectedKeys.contains(key),
-                  isSaving: _savingKeys.contains(key) || _isBatchSaving,
-                  onSelectedChanged: (value) {
-                    setState(() {
-                      if (value) {
-                        _selectedKeys.add(key);
-                      } else {
-                        _selectedKeys.remove(key);
-                      }
-                    });
-                  },
-                  onPreview: () => _previewSuggestion(suggestion),
-                  onEdit: () => _editSuggestion(suggestion),
-                  onQuickSave: () => _quickSaveSuggestion(suggestion),
-                ),
-                if (isPreviewing)
-                  Positioned(
-                    top: AppSpacing.sm,
-                    right: AppSpacing.sm,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: AppRadius.pillRadius,
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.play_arrow, size: 12, color: Colors.white),
-                          SizedBox(width: 3),
-                          Text(
-                            'Previewing',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                            ),
+    for (final suggestion in suggestions) {
+      final key = _keyFor(suggestion);
+      final isPreviewing = _previewingKey == key;
+      final recommendation = _postingRecommendation(suggestion.confidence);
+      final recommendationColor =
+          _postingRecommendationColor(suggestion.confidence);
+      final recommendationIcon =
+          _postingRecommendationIcon(suggestion.confidence);
+
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.md),
+          child: Stack(
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  AiSuggestionCard(
+                    suggestion: suggestion,
+                    selected: _selectedKeys.contains(key),
+                    isSaving: _savingKeys.contains(key) || _isBatchSaving,
+                    onSelectedChanged: (value) {
+                      setState(() {
+                        if (value) {
+                          _selectedKeys.add(key);
+                        } else {
+                          _selectedKeys.remove(key);
+                        }
+                      });
+                    },
+                    onPreview: () => _previewSuggestion(suggestion),
+                    onEdit: () => _editSuggestion(suggestion),
+                    onQuickSave: () => _quickSaveSuggestion(suggestion),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardBackgroundSubtle,
+                      borderRadius: AppRadius.lgRadius,
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _clipExplanation(suggestion),
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            height: 1.4,
                           ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Wrap(
+                          spacing: AppSpacing.sm,
+                          runSpacing: AppSpacing.xs,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            const Text(
+                              'Posting recommendation:',
+                              style: TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: recommendationColor.withAlpha(31),
+                                borderRadius: AppRadius.pillRadius,
+                                border: Border.all(
+                                  color: recommendationColor.withAlpha(115),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    recommendationIcon,
+                                    size: 14,
+                                    color: recommendationColor,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    recommendation,
+                                    style: TextStyle(
+                                      color: recommendationColor,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-              ],
-            ),
+                ],
+              ),
+              if (isPreviewing)
+                Positioned(
+                  top: AppSpacing.sm,
+                  right: AppSpacing.sm,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: AppRadius.pillRadius,
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.play_arrow,
+                          size: 12,
+                          color: Colors.white,
+                        ),
+                        SizedBox(width: 3),
+                        Text(
+                          'Previewing',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
-        );
-      }
+        ),
+      );
     }
 
     return widgets;
@@ -752,63 +993,4 @@ class _BatchSaveProgressDialog extends StatelessWidget {
 enum _ResultMenuAction {
   manualTrim,
   savedClips,
-}
-
-class _ClipSection {
-  final String label;
-  final IconData icon;
-  final int order;
-
-  const _ClipSection({
-    required this.label,
-    required this.icon,
-    required this.order,
-  });
-
-  static _ClipSection fromMood(String mood) {
-    switch (mood.toLowerCase()) {
-      case 'funny':
-        return const _ClipSection(label: 'Funny', icon: Icons.sentiment_very_satisfied, order: 0);
-      case 'sad':
-        return const _ClipSection(label: 'Sad', icon: Icons.sentiment_dissatisfied, order: 1);
-      case 'emotional':
-        return const _ClipSection(label: 'Emotional', icon: Icons.favorite, order: 2);
-      case 'romantic':
-        return const _ClipSection(label: 'Romantic', icon: Icons.favorite_border, order: 3);
-      case 'angry':
-        return const _ClipSection(label: 'Angry / Argument', icon: Icons.sentiment_very_dissatisfied, order: 4);
-      case 'action':
-        return const _ClipSection(label: 'Action', icon: Icons.bolt, order: 5);
-      case 'fight':
-        return const _ClipSection(label: 'Fight', icon: Icons.sports_mma, order: 6);
-      case 'weird':
-      case 'strange':
-        return const _ClipSection(label: 'Weird / Unexpected', icon: Icons.psychology_alt, order: 7);
-      case 'entertaining':
-        return const _ClipSection(label: 'Entertaining', icon: Icons.theater_comedy, order: 8);
-      case 'reaction':
-        return const _ClipSection(label: 'Reaction', icon: Icons.face_retouching_natural, order: 9);
-      case 'hook':
-        return const _ClipSection(label: 'Hooks / Quotes', icon: Icons.format_quote, order: 10);
-      case 'info':
-      case 'informative':
-      case 'information':
-        return const _ClipSection(label: 'Informative', icon: Icons.lightbulb_outline, order: 11);
-      case 'music':
-      case 'exciting':
-        return const _ClipSection(label: 'Music / Edit', icon: Icons.music_note, order: 12);
-      case 'viral':
-        return const _ClipSection(label: 'High Energy', icon: Icons.local_fire_department, order: 13);
-      default:
-        return const _ClipSection(label: 'Highlights', icon: Icons.auto_awesome, order: 14);
-    }
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return other is _ClipSection && other.label == label;
-  }
-
-  @override
-  int get hashCode => label.hashCode;
 }

@@ -11,10 +11,13 @@ class FaceReactionAnalyzerService {
   Future<List<FaceReactionFrameSignal>> analyzeFaceReactions(
     String videoPath, {
     required int durationSeconds,
+    int? sampleEverySecondsOverride,
   }) async {
     if (durationSeconds <= 1) return const [];
 
-    final sampleEverySeconds = _chooseSampleEverySeconds(durationSeconds);
+    final sampleEverySeconds =
+        sampleEverySecondsOverride?.clamp(1, 60) ??
+            _chooseSampleEverySeconds(durationSeconds);
 
     final signals = await _engine.analyzeVideoFrames(
       videoPath,

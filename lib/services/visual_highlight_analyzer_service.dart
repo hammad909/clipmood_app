@@ -45,6 +45,7 @@ class VisualHighlightAnalyzerService {
   Future<List<VisualFrameSignal>> analyzeVisualSignals(
     String videoPath, {
     required int durationSeconds,
+    int? sampleEverySecondsOverride,
   }) async {
     final videoFile = File(videoPath);
 
@@ -59,7 +60,9 @@ class VisualHighlightAnalyzerService {
     final tempDir = await getTemporaryDirectory();
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final rawVideoPath = '${tempDir.path}/clipmood_visual_$timestamp.raw';
-    final sampleEverySeconds = _chooseSampleEverySeconds(durationSeconds);
+    final sampleEverySeconds =
+        sampleEverySecondsOverride?.clamp(1, 60) ??
+            _chooseSampleEverySeconds(durationSeconds);
 
     await _extractLowResolutionFrames(
       videoPath: videoPath,

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:video_player/video_player.dart';
 import 'attention_worthy_clip_scorer.dart';
 import '../models/ai_scan_options.dart';
@@ -64,6 +65,16 @@ class AiClipAnalyzerService {
   final AiSignalBuilderService _signalBuilder = AiSignalBuilderService();
   final AttentionWorthyClipScorer _attentionScorer = AttentionWorthyClipScorer();
 
+  /// Load the small YAMNet model before the user presses Scan.
+  /// Call this from the editor's initState() to remove cold-start time.
+  Future<void> warmUp() async {
+    try {
+      await _yamnetService.load();
+    } catch (error) {
+      debugPrint('[AI warm-up] YAMNet warm-up failed safely: $error');
+    }
+  }
+
   Future<AiClipAnalyzerResult> analyzeVideo(
     String videoPath, {
     ClipIntent intent = ClipIntent.general,
@@ -71,6 +82,7 @@ class AiClipAnalyzerService {
     AiScanCancellationToken? cancellationToken,
     void Function(AiScanProgress progress)? onProgress,
   }) async {
+    final totalStopwatch = Stopwatch()..start();
     final videoFile = File(videoPath);
 
     void emit(
@@ -131,124 +143,140 @@ class AiClipAnalyzerService {
         return const AiClipAnalyzerResult(suggestions: []);
       }
 
-      List<YamnetWindowResult> yamnetWindows = const [];
-      List<AudioPeak> audioPeaks = const [];
-      List<VisualFrameSignal> visualSignals = const [];
-      List<FaceReactionFrameSignal> faceReactionSignals = const [];
-      TranscriptAnalysisResult transcriptResult = const TranscriptAnalysisResult(
-        segments: [],
-        source: 'Local transcript layer not run yet.',
+      Future<T> runStage<T>({
+        required String name,
+        required T fallback,
+        required Future<T> Function() action,
+      }) async {
+        final stopwatch = Stopwatch()..start();
+
+        try {
+          final value = await action();
+          debugPrint(
+            '[AI timing] $name: '
+            '${stopwatch.elapsedMilliseconds} ms',
+          );
+          return value;
+        } catch (error, stackTrace) {
+          debugPrint(
+            '[AI timing] $name failed safely after '
+            '${stopwatch.elapsedMilliseconds} ms: $error',
+          );
+          debugPrintStack(stackTrace: stackTrace);
+          return fallback;
+        }
+      }
+
+      emit(
+        AiScanStage.audioEvents,
+        0.10,
+        'Analyzing audio and video in parallel...',
+        detail:
+            'Audio events, energy, motion, and face reactions are running together.',
       );
 
-      if (options.enableAudioEvents) {
-        emit(
-          AiScanStage.audioEvents,
-          0.10,
-          'Running YAMNet audio event detection...',
-          detail: 'Finding laughter, speech, music, cheering, silence, and other audio events.',
-        );
+      // These four layers do not depend on one another. Starting them together
+      // reduces wall-clock time without changing the final scorer.
+      final yamnetFuture = options.enableAudioEvents
+          ? runStage<List<YamnetWindowResult>>(
+              name: 'YAMNet',
+              fallback: const <YamnetWindowResult>[],
+              action: () => _yamnetService.classifyVideoWindows(
+                videoPath,
+                maxWindows:
+                    options.maxYamnetWindowsForDuration(durationSeconds),
+              ),
+            )
+          : Future.value(const <YamnetWindowResult>[]);
 
-        try {
-          yamnetWindows = await _yamnetService.classifyVideoWindows(
-            videoPath,
-            maxWindows: options.maxYamnetWindowsForDuration(durationSeconds),
-          );
-        } catch (_) {
-          yamnetWindows = const [];
-        }
-      }
+      final audioPeaksFuture = options.enableAudioPeaks
+          ? runStage<List<AudioPeak>>(
+              name: 'Audio peaks',
+              fallback: const <AudioPeak>[],
+              action: () =>
+                  _audioPeakAnalyzer.analyzeAudioPeaks(videoPath),
+            )
+          : Future.value(const <AudioPeak>[]);
 
+      final visualFuture = options.enableVisualSignals
+          ? runStage<List<VisualFrameSignal>>(
+              name: 'Visual signals',
+              fallback: const <VisualFrameSignal>[],
+              action: () => _visualAnalyzer.analyzeVisualSignals(
+                videoPath,
+                durationSeconds: durationSeconds,
+                sampleEverySecondsOverride:
+                    options.visualSampleEverySecondsForDuration(
+                  durationSeconds,
+                ),
+              ),
+            )
+          : Future.value(const <VisualFrameSignal>[]);
+
+      final faceFuture = options.enableFaceReaction
+          ? runStage<List<FaceReactionFrameSignal>>(
+              name: 'Face reactions',
+              fallback: const <FaceReactionFrameSignal>[],
+              action: () => _faceReactionAnalyzer.analyzeFaceReactions(
+                videoPath,
+                durationSeconds: durationSeconds,
+                sampleEverySecondsOverride:
+                    options.faceSampleEverySecondsForDuration(
+                  durationSeconds,
+                ),
+              ),
+            )
+          : Future.value(const <FaceReactionFrameSignal>[]);
+
+      // Transcript selection depends on YAMNet speech windows, so it begins as
+      // soon as YAMNet finishes while the other layers continue in parallel.
+      final yamnetWindows = await yamnetFuture;
       checkCancelled();
 
-      if (options.enableAudioPeaks) {
-        emit(
-          AiScanStage.audioPeaks,
-          0.24,
-          'Checking audio energy peaks...',
-          detail: 'Finding loud moments, beat drops, reactions, and sudden audio spikes.',
-        );
+      emit(
+        AiScanStage.transcription,
+        0.46,
+        options.allowTranscriptionEngineRun
+            ? 'Transcribing the strongest speech moments...'
+            : 'Checking cached transcript...',
+        detail:
+            'Other visual and face analysis is continuing in the background.',
+      );
 
-        try {
-          audioPeaks = await _audioPeakAnalyzer.analyzeAudioPeaks(videoPath);
-        } catch (_) {
-          audioPeaks = const [];
-        }
-      }
+      final transcriptFuture = options.enableTranscription
+          ? runStage<TranscriptAnalysisResult>(
+              name: 'Transcript',
+              fallback: const TranscriptAnalysisResult(
+                segments: [],
+                source:
+                    'Transcript layer failed safely. Other analysis continued.',
+              ),
+              action: () => _transcriptService.transcribeVideo(
+                videoPath,
+                yamnetWindows: yamnetWindows,
+                durationSeconds: durationSeconds,
+                maxSpeechTasks: options.maxSpeechTranscriptionTasks,
+                allowEngineRun: options.allowTranscriptionEngineRun,
+              ),
+            )
+          : Future.value(
+              const TranscriptAnalysisResult(
+                segments: [],
+                source: 'Transcript layer disabled for this scan.',
+              ),
+            );
 
+      final audioPeaks = await audioPeaksFuture;
       checkCancelled();
 
-      if (options.enableTranscription) {
-        emit(
-          AiScanStage.transcription,
-          0.40,
-          options.allowTranscriptionEngineRun
-              ? 'Running local Whisper transcription...'
-              : 'Checking cached transcript only...',
-          detail: options.allowTranscriptionEngineRun
-              ? 'This is the slowest local layer, but it improves hooks, punchlines, quotes, and emotional lines.'
-              : 'Fast mode skips heavy Whisper work unless a transcript cache already exists.',
-        );
-
-        try {
-          transcriptResult = await _transcriptService.transcribeVideo(
-            videoPath,
-            yamnetWindows: yamnetWindows,
-            durationSeconds: durationSeconds,
-            maxSpeechTasks: options.maxSpeechTranscriptionTasks,
-            allowEngineRun: options.allowTranscriptionEngineRun,
-          );
-        } catch (_) {
-          transcriptResult = const TranscriptAnalysisResult(
-            segments: [],
-            source: 'Transcript layer failed safely. Audio/visual analysis continued.',
-          );
-        }
-      } else {
-        transcriptResult = const TranscriptAnalysisResult(
-          segments: [],
-          source: 'Transcript layer disabled for this scan.',
-        );
-      }
-
+      final visualSignals = await visualFuture;
       checkCancelled();
 
-      if (options.enableVisualSignals) {
-        emit(
-          AiScanStage.visualSignals,
-          0.62,
-          'Analyzing visual motion and scene changes...',
-          detail: 'Looking for cuts, movement, brightness changes, and visual energy.',
-        );
-
-        try {
-          visualSignals = await _visualAnalyzer.analyzeVisualSignals(
-            videoPath,
-            durationSeconds: durationSeconds,
-          );
-        } catch (_) {
-          visualSignals = const [];
-        }
-      }
-
+      final faceReactionSignals = await faceFuture;
       checkCancelled();
 
-      if (options.enableFaceReaction) {
-        emit(
-          AiScanStage.faceReactions,
-          0.76,
-          'Analyzing face/reaction moments...',
-          detail: 'Looking for smiles, face changes, and reaction-style frames.',
-        );
-
-        try {
-          faceReactionSignals = await _faceReactionAnalyzer.analyzeFaceReactions(
-            videoPath,
-            durationSeconds: durationSeconds,
-          );
-        } catch (_) {
-          faceReactionSignals = const [];
-        }
-      }
+      final transcriptResult = await transcriptFuture;
+      checkCancelled();
 
       checkCancelled();
 
@@ -317,6 +345,11 @@ class AiClipAnalyzerService {
       rethrow;
     } finally {
       await controller.dispose();
+      totalStopwatch.stop();
+      debugPrint(
+        '[AI timing] Complete scan: '
+        '${totalStopwatch.elapsedMilliseconds} ms',
+      );
     }
   }
 

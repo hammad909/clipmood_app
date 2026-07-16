@@ -1,9 +1,10 @@
 import 'dart:math';
 
-/// Controls how much local AI work ClipMood should do for one scan.
+/// Controls how much local AI work ClipMood performs for one scan.
 ///
-/// This keeps the product practical on real phones. Creators can choose quick
-/// previews or slower/high-accuracy scans without changing the AI architecture.
+/// Balanced keeps every signal family enabled, but samples the video more
+/// efficiently so typical 1–5 minute videos can finish much faster.
+/// Accurate keeps the heavier scan for users who are willing to wait.
 enum AiScanMode {
   balanced,
   accurate,
@@ -22,9 +23,9 @@ extension AiScanModeX on AiScanMode {
   String get helperText {
     switch (this) {
       case AiScanMode.balanced:
-        return 'Recommended. Uses audio, selected local Whisper chunks, visual signals, and face/reaction signals.';
+        return 'Recommended for normal use. Keeps audio, Whisper, visual, and face signals with a faster sampling budget.';
       case AiScanMode.accurate:
-        return 'Best quality. Scans more windows and allows more local Whisper chunks. Slower on phones.';
+        return 'Heavier scan with more audio windows and Whisper chunks. Best used only when extra detail matters.';
     }
   }
 
@@ -40,14 +41,14 @@ class AiScanOptions {
   final bool enableVisualSignals;
   final bool enableFaceReaction;
 
-  /// If false, TranscriptService can still read an existing transcript cache,
-  /// but it will not run the heavy on-device Whisper engine.
+  /// When false, TranscriptService may still read a transcript cache, but it
+  /// does not run the heavier on-device Whisper engine.
   final bool allowTranscriptionEngineRun;
 
-  /// Limits how many speech chunks local Whisper can process in one scan.
+  /// Maximum number of speech chunks that Whisper may process.
   final int maxSpeechTranscriptionTasks;
 
-  /// Optional hard cap for YAMNet windows. Leave null to use mode defaults.
+  /// Optional hard cap for YAMNet windows.
   final int? maxYamnetWindowsOverride;
 
   const AiScanOptions({
@@ -58,7 +59,7 @@ class AiScanOptions {
     this.enableVisualSignals = true,
     this.enableFaceReaction = true,
     this.allowTranscriptionEngineRun = true,
-    this.maxSpeechTranscriptionTasks = 18,
+    this.maxSpeechTranscriptionTasks = 6,
     this.maxYamnetWindowsOverride,
   });
 
@@ -73,8 +74,9 @@ class AiScanOptions {
           enableVisualSignals: true,
           enableFaceReaction: true,
           allowTranscriptionEngineRun: true,
-          maxSpeechTranscriptionTasks: 18,
+          maxSpeechTranscriptionTasks: 6,
         );
+
       case AiScanMode.accurate:
         return const AiScanOptions(
           mode: AiScanMode.accurate,
@@ -89,6 +91,8 @@ class AiScanOptions {
     }
   }
 
+  /// Balanced windows are distributed across the complete video rather than
+  /// concentrating on the beginning.
   int maxYamnetWindowsForDuration(int durationSeconds) {
     if (maxYamnetWindowsOverride != null) {
       return max(1, maxYamnetWindowsOverride!);
@@ -96,15 +100,49 @@ class AiScanOptions {
 
     switch (mode) {
       case AiScanMode.balanced:
-        if (durationSeconds <= 60) return 60;
-        if (durationSeconds <= 180) return 90;
-        if (durationSeconds <= 600) return 120;
-        return 150;
+        if (durationSeconds <= 60) return 30;
+        if (durationSeconds <= 180) return 42;
+        if (durationSeconds <= 600) return 60;
+        return 72;
+
       case AiScanMode.accurate:
         if (durationSeconds <= 60) return 90;
         if (durationSeconds <= 180) return 140;
         if (durationSeconds <= 600) return 200;
         return 260;
+    }
+  }
+
+  int visualSampleEverySecondsForDuration(int durationSeconds) {
+    switch (mode) {
+      case AiScanMode.balanced:
+        if (durationSeconds <= 60) return 1;
+        if (durationSeconds <= 180) return 2;
+        if (durationSeconds <= 600) return 3;
+        return 5;
+
+      case AiScanMode.accurate:
+        if (durationSeconds <= 60) return 1;
+        if (durationSeconds <= 180) return 2;
+        if (durationSeconds <= 600) return 4;
+        if (durationSeconds <= 1200) return 6;
+        return 8;
+    }
+  }
+
+  int faceSampleEverySecondsForDuration(int durationSeconds) {
+    switch (mode) {
+      case AiScanMode.balanced:
+        if (durationSeconds <= 60) return 2;
+        if (durationSeconds <= 180) return 3;
+        if (durationSeconds <= 600) return 5;
+        return 7;
+
+      case AiScanMode.accurate:
+        if (durationSeconds <= 45) return 1;
+        if (durationSeconds <= 180) return 2;
+        if (durationSeconds <= 600) return 3;
+        return 4;
     }
   }
 

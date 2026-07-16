@@ -41,14 +41,32 @@ class YamnetAudioClassifierService {
 
   Interpreter? _interpreter;
   List<String> _labels = [];
+  Future<void>? _loadFuture;
 
   bool get isLoaded => _interpreter != null && _labels.isNotEmpty;
 
-  Future<void> load() async {
-    _interpreter ??= await Interpreter.fromAsset(_modelPath);
+  Future<void> load() {
+    return _loadFuture ??= _loadInternal();
+  }
 
-    if (_labels.isEmpty) {
-      _labels = await _loadLabels();
+  Future<void> _loadInternal() async {
+    try {
+      if (_interpreter == null) {
+        final options = InterpreterOptions()
+          ..threads = min(4, max(1, Platform.numberOfProcessors));
+
+        _interpreter = await Interpreter.fromAsset(
+          _modelPath,
+          options: options,
+        );
+      }
+
+      if (_labels.isEmpty) {
+        _labels = await _loadLabels();
+      }
+    } catch (_) {
+      _loadFuture = null;
+      rethrow;
     }
   }
 
@@ -110,11 +128,11 @@ Future<List<YamnetWindowResult>> classifyVideoWindows(
   final results = <YamnetWindowResult>[];
 
   for (final startSample in startPositions) {
-    final window = Float32List(_yamnetWindowSamples);
-
-    for (int i = 0; i < _yamnetWindowSamples; i++) {
-      window[i] = samples[startSample + i];
-    }
+    final window = Float32List.sublistView(
+      samples,
+      startSample,
+      startSample + _yamnetWindowSamples,
+    );
 
     final predictions = await classifySamples(window);
 
@@ -148,18 +166,19 @@ List<int> _buildSampleStartPositions({
   required int totalSamples,
   required int maxWindows,
 }) {
+  final safeMaxWindows = max(1, maxWindows);
   final maxStartSample = totalSamples - _yamnetWindowSamples;
 
-  if (maxStartSample <= 0) {
+  if (maxStartSample <= 0 || safeMaxWindows == 1) {
     return [0];
   }
 
-  final naturalWindowCount =
-      (maxStartSample ~/ _windowStepSamples).clamp(1, maxWindows);
+  final naturalCount = (maxStartSample ~/ _windowStepSamples) + 1;
 
-  final positions = <int>{};
+  // Preserve dense natural sampling when it already fits the budget.
+  if (naturalCount <= safeMaxWindows) {
+    final positions = <int>[];
 
-  if (naturalWindowCount <= maxWindows) {
     for (
       int startSample = 0;
       startSample <= maxStartSample;
@@ -167,26 +186,47 @@ List<int> _buildSampleStartPositions({
     ) {
       positions.add(startSample);
     }
-  } else {
-    final step = maxStartSample / (maxWindows - 1);
 
-    for (int i = 0; i < maxWindows; i++) {
-      final position = (i * step).round();
-      final safePosition = position.clamp(0, maxStartSample);
-      positions.add(safePosition);
+    if (positions.isEmpty || positions.last != maxStartSample) {
+      positions.add(maxStartSample);
     }
+
+    return positions;
   }
 
-  positions.add(0);
-  positions.add(maxStartSample);
+  // Otherwise distribute the exact budget across the complete video.
+  final positions = <int>{};
+  final step = maxStartSample / (safeMaxWindows - 1);
 
-  final sortedPositions = positions.toList()..sort();
+  for (int i = 0; i < safeMaxWindows; i++) {
+    positions.add((i * step).round().clamp(0, maxStartSample));
+  }
 
-  return sortedPositions.take(maxWindows).toList();
+  positions
+    ..add(0)
+    ..add(maxStartSample);
+
+  final sorted = positions.toList()..sort();
+
+  if (sorted.length <= safeMaxWindows) {
+    return sorted;
+  }
+
+  // Rounding can create one extra point. Re-sample deterministically.
+  return List<int>.generate(
+    safeMaxWindows,
+    (index) {
+      final ratio = index / (safeMaxWindows - 1);
+      return (ratio * maxStartSample).round().clamp(0, maxStartSample);
+    },
+    growable: false,
+  );
 }
 
   Future<List<YamnetPrediction>> classifySamples(Float32List samples) async {
-    await load();
+    if (!isLoaded) {
+      await load();
+    }
 
     final interpreter = _interpreter;
 
