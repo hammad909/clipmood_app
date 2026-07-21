@@ -1,4 +1,4 @@
-package com.example.clipmood_app
+package com.hammad.clipmood
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -51,3 +51,9 @@ android {
 flutter {
     source = "../.."
 }
+
+
+dependencies {
+    implementation("androidx.work:work-runtime:2.11.2")
+    implementation("androidx.room:room-runtime:2.8.4")
+}

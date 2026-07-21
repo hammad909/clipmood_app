@@ -1,6 +1,6 @@
 import 'dart:ui';
-
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/app_theme.dart';
 
@@ -68,6 +68,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: Text('Appearance settings were reset.'),
       ),
     );
+  }
+
+  static final Uri _privacyPolicyUri = Uri.parse(
+    'https://clipmood-privacy.netlify.app',
+  );
+
+  Future<void> _openPrivacyPolicy() async {
+    try {
+      final launched = await launchUrl(
+        _privacyPolicyUri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not open the privacy policy right now.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not open the privacy policy right now.',
+          ),
+        ),
+      );
+    }
   }
 
   void _showAboutClipMood() {
@@ -280,6 +313,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: 'Manual Trim',
                   subtitle:
                       'Manual trimming can be used for videos of any supported length.',
+                ),
+              ],
+            ),
+
+            const SizedBox(height: AppSpacing.lg),
+            const _SectionTitle(
+              title: 'Privacy & Legal',
+              icon: Icons.privacy_tip_outlined,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            _GlassSettingsCard(
+              children: [
+                _SettingsActionTile(
+                  icon: Icons.privacy_tip_outlined,
+                  title: 'Privacy Policy',
+                  subtitle:
+                      'Learn how ClipMood processes videos, local data, and advertising information.',
+                  onTap: () {
+                    _openPrivacyPolicy();
+                  },
                 ),
               ],
             ),
