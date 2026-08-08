@@ -134,7 +134,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return null;
     }
 
-    final validation = await _videoPickerService.validateFreeVideoDuration(
+    final validation = await _videoPickerService.validateAiScanVideo(
       selectedVideo.path,
     );
 
@@ -173,7 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           content: Text(
             validation.message ??
-                'Free AI scan supports videos from 1 minute to 5 minutes.',
+                'The selected video exceeds ClipMood\'s supported limits.',
             style: const TextStyle(
               color: AppColors.textSecondary,
             ),
@@ -246,6 +246,18 @@ class _HomeScreenState extends State<HomeScreen> {
             content: Text('No video selected.'),
           ),
         );
+        return;
+      }
+
+      final validation =
+          await _videoPickerService.validateManualTrimVideo(
+        selectedVideo.path,
+      );
+
+      if (!mounted) return;
+
+      if (!validation.isValid) {
+        await _showVideoLimitDialog(validation);
         return;
       }
 
@@ -616,7 +628,7 @@ class _AiScanHintCard extends StatelessWidget {
                     ),
                     SizedBox(height: 4),
                     Text(
-                      'Tap the purple AI Scan button below to choose a video.',
+                      'Tap AI Scan to choose a 1–5 minute video up to 500 MB.',
                       style: TextStyle(
                         color: AppColors.textSecondary,
                         fontSize: 12.5,

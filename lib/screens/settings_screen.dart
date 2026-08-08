@@ -1,4 +1,5 @@
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -305,14 +306,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   icon: Icons.auto_awesome,
                   title: 'AI Scan',
                   subtitle:
-                      'The free AI scan currently supports videos from 1 to 5 minutes.',
+                      'AI Scan supports videos from 1 to 5 minutes, up to 500 MB.',
                 ),
                 _SettingsDivider(),
                 _InformationTile(
                   icon: Icons.content_cut_rounded,
                   title: 'Manual Trim',
                   subtitle:
-                      'Manual trimming can be used for videos of any supported length.',
+                      'Manual Trim supports videos up to 1 GB with no ClipMood duration limit.',
                 ),
               ],
             ),
