@@ -14,7 +14,7 @@ class AdService {
 
   /// Keep true while developing/testing.
   /// Set false only after adding real AdMob app/ad unit IDs.
-  static const bool useTestAds = true;
+  static const bool useTestAds = false;
 
   /// Later connect this to your real premium entitlement/subscription state.
   static const bool isPremiumUser = false;
